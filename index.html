@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Rhein-Main Live</title>
+<meta name="description" content="Live-Karte der S-Bahnen, U-Bahnen und Trams im Rhein-Main-Gebiet mit Verspätungen.">
+<meta name="theme-color" content="#10151b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RM Live">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root{
+    --bg:#10151b; --panel:#171e26f2; --panel-solid:#171e26; --line:#2a3542;
+    --ink:#e8edf2; --muted:#8c9aaa; --accent:#5ec8ff;
+    --ok:#3ecf8e; --warn:#f5c542; --late:#ff8a3d; --bad:#ff4d5e;
+    --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+    --ui:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+    color-scheme:dark;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 var(--ui)}
+  #map{position:absolute;inset:0;background:var(--bg)}
+  #fx{position:absolute;inset:0;pointer-events:none;z-index:450}
+  .leaflet-container{background:var(--bg);font-family:var(--ui)}
+  .leaflet-control-attribution{background:#10151bcc!important;color:var(--muted)!important;font-size:10px}
+  .leaflet-control-attribution a{color:#a9c4d8!important}
+  .leaflet-bar a{background:var(--panel-solid);color:var(--ink);border-color:var(--line)!important}
+  .leaflet-bar a:hover{background:#222c37}
+
+  .card{position:absolute;z-index:1000;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+        backdrop-filter:blur(8px);box-shadow:0 8px 28px #0007}
+  #hud{top:calc(12px + env(safe-area-inset-top,0px));left:12px;width:292px;max-width:calc(100vw - 24px);padding:14px 14px 12px}
+  .head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  h1{font:700 26px/1 var(--display);letter-spacing:.01em;margin:0;text-transform:uppercase}
+  #clock{font:600 22px/1 var(--display);font-variant-numeric:tabular-nums;color:var(--accent)}
+  .status{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;margin-top:6px}
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 var(--ok);animation:p 2s infinite}
+  .pulse.err{background:var(--bad);animation:none}
+  @keyframes p{0%{box-shadow:0 0 0 0 #3ecf8e88}70%{box-shadow:0 0 0 8px #3ecf8e00}100%{box-shadow:0 0 0 0 #3ecf8e00}}
+  .lbl{font:600 11px/1 var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:14px 0 7px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{appearance:none;border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:6px;
+        padding:5px 9px;font:600 13px/1 var(--ui);cursor:pointer;display:flex;align-items:center;gap:6px}
+  .chip .n{font-variant-numeric:tabular-nums;opacity:.75;font-weight:500}
+  .chip[aria-pressed="true"]{background:#223040;color:var(--ink);border-color:#3d5064}
+  .chip:focus-visible,.x:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .sym{display:inline-grid;place-items:center;min-width:18px;height:18px;border-radius:4px;font:700 12px/1 var(--display);color:#fff}
+  .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{flex:1;appearance:none;border:0;background:transparent;color:var(--muted);padding:6px 8px;font:600 13px/1 var(--ui);cursor:pointer}
+  .seg button[aria-pressed="true"]{background:#223040;color:var(--ink)}
+  #q{width:100%;box-sizing:border-box;background:#0f141a;border:1px solid var(--line);border-radius:6px;color:var(--ink);padding:7px 9px;font:500 13px var(--ui)}
+  #q::placeholder{color:#5f6d7c}
+  .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:4px}
+  .stat b{display:block;font:700 24px/1 var(--display);font-variant-numeric:tabular-nums}
+  .stat span{font-size:11px;color:var(--muted)}
+  .bar{height:6px;border-radius:3px;background:#0f141a;overflow:hidden;display:flex;margin-top:10px}
+  .bar i{display:block;height:100%}
+  #worst{list-style:none;margin:0;padding:0;display:grid;gap:3px}
+  #worst li{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:5px;cursor:pointer;font-size:13px}
+  #worst li:hover{background:#ffffff0d}
+  #worst .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
+  #worst .d{font:700 15px/1 var(--display);font-variant-numeric:tabular-nums}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:10px}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+  #toggle{display:none}
+
+  #info{top:calc(12px + env(safe-area-inset-top,0px));right:12px;width:320px;max-width:calc(100vw - 24px);max-height:calc(100% - 90px);
+        display:flex;flex-direction:column;overflow:hidden}
+  .ih{padding:14px 14px 10px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start}
+  .ih .big{font:700 22px/1 var(--display);padding:5px 8px;border-radius:6px;min-width:26px;text-align:center}
+  .ih .dir{flex:1;min-width:0}
+  .ih .dir b{display:block;font:600 16px/1.2 var(--ui)}
+  .ih .dir span{font-size:12px;color:var(--muted)}
+  .x{appearance:none;border:0;background:transparent;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;padding:2px 4px}
+  .delaybox{padding:10px 14px;display:flex;gap:16px;border-bottom:1px solid var(--line)}
+  .delaybox div b{display:block;font:700 22px/1 var(--display);font-variant-numeric:tabular-nums}
+  .delaybox div span{font-size:11px;color:var(--muted)}
+  #stops{overflow:auto;padding:6px 0 10px;margin:0;list-style:none}
+  #stops li{display:grid;grid-template-columns:16px 1fr auto;gap:8px;align-items:center;padding:4px 14px;font-size:13px}
+  #stops li .dot{width:9px;height:9px;border-radius:50%;border:2px solid var(--muted);justify-self:center}
+  #stops li.past{color:#5f6d7c}
+  #stops li.past .dot{background:#5f6d7c;border-color:#5f6d7c}
+  #stops li.next{font-weight:600}
+  #stops li.next .dot{background:var(--accent);border-color:var(--accent)}
+  #stops .tm{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  #stops .tm s{color:#5f6d7c;margin-right:5px}
+  .note{padding:10px 14px;color:var(--muted);font-size:12px}
+
+  #locate{position:absolute;z-index:900;right:12px;bottom:calc(96px + env(safe-area-inset-bottom,0px));width:34px;height:34px;
+          border-radius:6px;border:1px solid var(--line);background:var(--panel-solid);color:var(--ink);display:grid;place-items:center;cursor:pointer;padding:0}
+  #locate[aria-pressed="true"]{color:var(--accent);border-color:var(--accent)}
+  #locate svg{width:18px;height:18px}
+  .leaflet-bottom{margin-bottom:env(safe-area-inset-bottom,0px)}
+  @media (max-width:640px){
+    #hud{width:auto;right:12px;padding:10px 12px;max-height:calc(100% - 110px - env(safe-area-inset-top,0px));overflow:auto}
+    #hud.collapsed{overflow:hidden}
+    #hud.collapsed .body{display:none}
+    #toggle{display:block;position:absolute;right:6px;top:4px;font-size:22px;padding:8px 10px}
+    #hud .head{padding-right:40px}
+    h1{font-size:22px}
+    #clock{font-size:19px}
+    .chip{padding:8px 11px;font-size:14px}
+    .seg button{padding:9px 8px;font-size:14px}
+    #q{font-size:16px;padding:9px 10px}
+    #worst li{padding:8px 6px}
+    #info{top:auto;bottom:calc(12px + env(safe-area-inset-bottom,0px));left:8px;right:8px;width:auto;max-height:48%}
+    .x{font-size:26px;padding:4px 8px}
+    #locate{width:44px;height:44px;bottom:calc(104px + env(safe-area-inset-bottom,0px))}
+    .leaflet-bar a{width:44px!important;height:44px!important;line-height:44px!important}
+  }
+  @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<canvas id="fx"></canvas>
+
+<section id="hud" class="card" aria-label="Steuerung">
+  <button class="x" id="toggle" aria-label="Panel ein-/ausklappen">☰</button>
+  <div class="head"><h1>Rhein-Main Live</h1><span id="clock">--:--:--</span></div>
+  <div class="status"><span class="pulse" id="dot"></span><span id="st">Lade Echtzeitdaten …</span></div>
+  <div class="body">
+    <div class="lbl">Verkehrsmittel</div>
+    <div class="chips" id="modes"></div>
+    <div class="lbl">Ebenen</div>
+    <div class="chips">
+      <button class="chip" id="lyNet" aria-pressed="true">Liniennetz</button>
+      <button class="chip" id="lyStations" aria-pressed="true">Stationen</button>
+      <button class="chip" id="lyLabels" aria-pressed="true">Namen</button>
+    </div>
+    <div class="lbl">Einfärbung</div>
+    <div class="seg" id="colorMode">
+      <button id="cmLine" aria-pressed="true">Linienfarbe</button>
+      <button id="cmDelay" aria-pressed="false">Verspätung</button>
+    </div>
+    <div class="lbl">Linien filtern</div>
+    <input id="q" placeholder="z. B. U4, S8, 11" autocomplete="off">
+    <div class="lbl">Jetzt unterwegs</div>
+    <div class="stats">
+      <div class="stat"><b id="sN">–</b><span>Fahrzeuge</span></div>
+      <div class="stat"><b id="sP">–</b><span>pünktlich &lt;3′</span></div>
+      <div class="stat"><b id="sA">–</b><span>Ø Verspätung</span></div>
+    </div>
+    <div class="bar" id="bar"></div>
+    <div class="legend">
+      <span><i style="background:var(--ok)"></i>&lt; 1 min</span>
+      <span><i style="background:var(--warn)"></i>1–3</span>
+      <span><i style="background:var(--late)"></i>3–6</span>
+      <span><i style="background:var(--bad)"></i>&gt; 6 min</span>
+    </div>
+    <div class="lbl">Größte Verspätungen</div>
+    <ul id="worst"></ul>
+  </div>
+</section>
+
+<section id="info" class="card" hidden aria-live="polite"></section>
+<button id="locate" aria-pressed="false" aria-label="Mein Standort" title="Mein Standort"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-polylineoffset@1.1.1/leaflet.polylineoffset.js"></script>
+<script>window.NET={"lines":{"S9":{"c":"#872996","m":"S"},"S8":{"c":"#88c946","m":"S"},"S1":{"c":"#009edd","m":"S"},"S6":{"c":"#40c1f3","m":"S"},"51":{"c":"#4a4a49","m":"T"},"50":{"c":"#000000","m":"T"},"53":{"c":"#646363","m":"T"},"52":{"c":"#7c7b7b","m":"T"},"S5":{"c":"#9d4d23","m":"S"},"S7":{"c":"#214d36","m":"S"},"6":{"c":"#fe782b","m":"T"},"1":{"c":"#f77893","m":"T"},"7":{"c":"#fb3199","m":"T"},"4":{"c":"#1e78c2","m":"T"},"9":{"c":"#7ac64d","m":"T"},"3":{"c":"#ffbe3c","m":"T"},"5":{"c":"#3ab5e6","m":"T"},"2":{"c":"#00ab4f","m":"T"},"S2":{"c":"#ff2e17","m":"S"},"8":{"c":"#f5381f","m":"T"},"S4":{"c":"#ffc734","m":"S"},"S3":{"c":"#00b098","m":"S"},"U7":{"c":"#f19e2d","m":"U"},"U3":{"c":"#345aaf","m":"U"},"U1":{"c":"#c52b1e","m":"U"},"U6":{"c":"#0082ca","m":"U"},"U2":{"c":"#00ab4f","m":"U"},"U5":{"c":"#0c7d3e","m":"U"},"U4":{"c":"#fc5cac","m":"U"},"U9":{"c":"#ffd939","m":"U"},"U8":{"c":"#ca7fbe","m":"U"},"18":{"c":"#faa519","m":"T"},"16":{"c":"#f5821f","m":"T"},"14":{"c":"#f05a22","m":"T"},"12":{"c":"#c64a1a","m":"T"},"21":{"c":"#faa519","m":"T"},"17":{"c":"#f05a22","m":"T"},"11":{"c":"#fec10c","m":"T"},"15":{"c":"#fec10c","m":"T"},"19":{"c":"#888888","m":"T"}},"edges":[["ygbpHmugr@vGf`@rC~VbFn[|@dI`@jGNnGAbISlGc@~F}@pHmBzKcCbK_DbIkT~c@_DpH{DhMaFxT",["S8","S9"]],["s_fpHyspq@nBkDfI{PfC}Hj@gCdAwHVkDLgIMyJ]kGwM_xBq@}Yg@kj@iBke@BwE`@aGdA_G|AaFv@cB`A}AjBsBlD_CtDaAlDE|WbEnBN`CI~Cs@`DiBrBuB~BwDzBuGr@{Dj@sHA_IiCsa@K_I`@_JfCoM",["S9"]],["elhpHuliq@dAlC|AbCrBlBzBfAdCd@xABzCe@zBgAjBaBxw@waAjIuJfN_M",["S8"]],["s|gpHqrmr@~Xf]fLrP~IfP~FjM|EzLvCpIdEhNbHfY|Fx\\tArKrA~Mr@`M^hMDlQUjMa@nJcAvMaAdJ_G~c@_AjKg@`J_@fO_ArtAa@bTs@dS",["S1"]],["ypfpHojrr@zdAb{B`I|RfHtU`FzTjQvfA",["S8","S9"]],["cjcpH{xoq@hDyUz@sOj@kElIm_@hE}NpDuJ`Pg\\vNe^tEmIpS_[bBkB~CmC`DoBlDyAhGqA`RkC~QeD|Ke@zGNdJ`AzK|B",["S5","S6"]],["cjcpH{xoq@}CfWU~DFfGbArNLhE[zHiAhGcBjEiBhCmb@n^",["S5","S6"]],["aicpHkxoq@bEwYzA{GrEmOj@}C~@mR`@iEp@wCxAqEdDeJtM_XbH_PjHmRpEcItSe[dFaFhCeB|EwBlBi@zVqDjMcCpDe@tHa@dJJdJbAzKzB",["S5","S6"]],["k`}oHgzvq@rcCrh@bHhApDPnEInFs@pBe@vGwCtDkChD_DhIeL",["S5","S6"]],["m}voHelvq@t_@sj@rDkHvDmKlB_IhB_L~LwtAxAuJ",["S5","S6"]],["yytoHaf|q@bAuDdBgEdB_D~C}DpC{BjDeBlCs@jEW~ABp^rCbG|@tC|@lKvE`OlEjEnBjJxFtCtAjE|AlKjCri@dIxJdAdICzH{@rt@aOvCeAtBwAjAgAhDiE",["S5","S6"]],["o_fpHospq@_CpC_BnAwBbAqOdD_d@zK{LhE}C|A_IzEyK`JuF`GsYn]wIfNaU~UoHjHiKjGcOxM",["S1","S9"]],["m_cpHekjr@dH~b@rF~UxEvY",["S8","S9"]],["arhpHaxiq@|@vHpAnE~BhEpBnB~CzAnC^tBEjAU`DwAdDuB|EiFdFsGpIyLf\\oa@~KkOfN_M",["S8"]],["yicpH{xoq@oDfZIxEtAjY[zHiAhGcBjEiBhCmb@n^",["S8"]],["yocpHg|vq@~CrhAf@zJt@bGxMjv@^tCN`EOjGe@hDgHjWoB`LyBnO",["S8"]],["yocpHg|vq@o@c\\mCklDZiN|@iM`DsUfDwO",["S8"]],["oqbpHyfeq@aFlBk@AoE_GSi@YkC",["51","53"]],["oqbpHyfeq@nLwEdAaARgAAsAgBwN",["51","53"]],["apapHufgq@{CnEgDtDuE|HgBxBWv@IhATlC",["51","53"]],["ew`pH_{gq@mN~GqBzB{DlF",["51","53"]],["ew`pH_{gq@bDyAnIcChDsAnA_AhAM",["51","53"]],["wi_pHcahq@iD{BsB{@w@K_HF",["51","53"]],["wi_pHcahq@rLzHxCfC",["51","53"]],["_t}oHkmfq@oAcBaG_KuHiJkAcAuKaH",["51","53"]],["u{dpHwjaq@`DfJtA~SlAfK|G`T",["50","51"]],["a|cpHkf~p@wBmF}BoNyC{J",["50","51"]],["a|cpHkf~p@|@~Br@nGk@p^@jD",["50"]],["yycpH}t|p@T|CvAlIPnB@tCc@tG",["50"]],["ctdpHwzlq@KzLrBpIVpB",["53"]],["w{cpHooiq@M{ByA{De@iEgAmSIiIc@oNe@oA_EiDiAwAs@wAc@sB",["51","53"]],["mocpHcsgq@qJor@W{G",["51","53"]],["mocpHcsgq@lGlh@nAdIrAjM",["51","53"]],["ct}oHcmfq@zBxC~@hBl@lBrA|G",["51","53"]],["ej}oHsxeq@dFnX",["51","53"]],["_x|oHktbq@g@sAIwALw@|@cCRmDwAgh@SkAy@cBgBiAk@o@g@yAk@uC",["51","53"]],["az|oHubaq@OmB\\oAhJ}GfAuA\\{AQyBiKmX",["51","53"]],["az|oHsbaq@xIx`@",["51","53"]],["sx|oHavbq@UkA@w@jAwDN}CuAeh@W}A]{@i@q@cBeAe@q@c@oAg@oC",["51","53"]],["ij}oHuyeq@nFjY",["51","53"]],["gt}oHsmfq@bC`DbArBt@fC~@~E",["51","53"]],["gt}oHumfq@iIyMuHiJkAcAuKaH",["51","53"]],["mi_pH{`hq@hLrHxCfC",["51","53"]],["mi_pH{`hq@sDcCsB{@w@KyHH",["51","53"]],["cw`pHa{gq@`DwAnIcCbEcBh@i@z@Q",["51","53"]],["cw`pHa{gq@oN`HqBzB_EtF",["51","53"]],["epapHmfgq@wCfEgDtD{ExHgBtBa@rBVlD",["51","53"]],["qocpHqtgq@vGzi@nA`IxAjN",["51","53"]],["qocpHqtgq@cJqp@_@qI",["51","53"]],["u{cpHupiq@QyBsA{Ci@mFe@yL[oDGgHg@cPUi@y@}@{DiDyA{C]gB",["51","53"]],["{sdpHk{lq@OdMnC~L",["53"]],["{sdpHk{lq@IsERkAbDsHdCuD",["53"]],["kicpHeqmq@uEmCuAF{D_AuBUoCwAc@FsB~@}AtAw@dA",["50","53"]],["ij}oHuyeq@xG~]l@~AnAfA",["51"]],["arbpH{feq@rLyEd@Wd@m@RcAAmAcBoN",["51","53"]],["arbpH{feq@}EfBm@OcEaG]aC",["51","53"]],["{odpHe_lq@iBaIg@q@i@AsB~AuAKoAbA",["51","52"]],["oyepHsjkq@jGkGzNcMn@wBb@e@",["50","51","52"]],["knfpHerjq@zSmW",["50","51","52"]],["m_gpHmbjq@rAYrBsAxIiK",["50","51","52"]],["m_gpHmbjq@c@@c@\\iCfOo@`Ci@jAqErF_C`A",["50","51"]],["ksgpHaaiq@wAVYXMd@LdGw@lKEpD",["50","51"]],["{xgpHcdhq@^|E~AzGvCdH`C|C",["50","51"]],["{lfpHwjgq@wHfG_Bl@gCh@aB?iB]kCoAmB_B",["50","51"]],["quepH}udq@p@|InDhT\\rE|@nCnAxG",["50","51"]],["scepHsmbq@oDcS",["50","51"]],["u{dpHwjaq@_@}AkAkNqCoO",["50","51"]],["a|cpHkf~p@dBhD`A|ChB|R|DpQf@hA|@hAdAh@`BP",["51"]],["cecpHco|p@rFF|CVlDl@fAz@",["51"]],["g|cpHag~p@kB{E{@iEaAgH}C_K",["50","51"]],["o|dpH_naq@TrAdCvGh@|BpAbSfArJ~GlT",["50","51"]],["o|dpH_naq@eAgMaDqQ",["50","51"]],["wcepH{nbq@}DsT",["50","51"]],["muepHgvdq@TfEt@pG`DbR|@nCT`Dt@fE",["50","51"]],["muepHgvdq@}@_OKqHT_D",["50","51"]],["ktepHgrfq@n@pDBbFiCvO",["50","51"]],["ktepHgrfq@iA_C{O_Sy@g@eACqBpA",["50","51"]],["q_gpH_bjq@i@DSVcDlQaAbCsEpFsBbA",["50","51"]],["m_gpH_bjq@fB]`B_A`CeCjFcH",["50","51","52"]],["umfpHgrjq@jTmW",["50","51","52"]],["ixepHujkq@~IeJbK_JXe@XuAdAaA",["50","51","52"]],["cpdpHw~kq@WqBmAwEe@k@s@DeBtAkAOu@f@",["51"]],["gicpHmqmq@aHiEuB_@yAVeBIw@U}AcA[?aChA}BrBq@|@",["50","53"]],["evdpHw{lq@p@yB\\}C~CqHpBeD",["50"]],["evdpHw{lq@eDbKOlEUf@_Ax@",["50"]],["mtepHarfq@m@wA{@mA}NwQoAm@{@DYN",["50","51"]],["mtepHarfq@l@lD@~EmClP",["50","51"]],["quepH}udq@w@cLSwIPkE",["50","51"]],["uycpH{u|p@VtDhBvL?~D_@dF",["50"]],["g|cpHag~p@jAtCp@xFk@tc@",["50"]],["gofpH_igq@eGxEcDz@sAJw@AgB_@kCoAmB{A",["50","51"]],["sxgpHidhq@TxD~ApHrBlFhBzC|@bA",["50","51"]],["asgpHw`iq@cB\\a@|@L~DC`Cs@dIAhD",["50","51"]],["mudpHa}lq@qD~KSvEOf@g@f@",["50"]],["mudpHa}lq@Z_A^iDbDsHdCuD",["50"]],["k}dpHyflq@t@g@jANrAeA",["52"]],["cpdpHw~kq@WqBuAeFm@c@u@Z",["52"]],["cbdpHukkq@}AsC_EiDiAwAs@wAc@sB",["52"]],["cbdpHukkq@hIrPd@d@v@R",["52"]],["{tcpHgxjq@~NnCdAFz@O",["52"]],["y`cpH_tjq@rCoA`BiAjE{Hl@g@d@Iv@P`BnAvA`DtC`BbAR",["52"]],["cqapHixjq@y@gCi@i@i@M{@Vk@dAk@b@sCv@}A@",["52"]],["cqapHixjq@fEzN|AdG|AlIdAjD",["52"]],["}adpHwkkq@yAmCkF{EyA{C]gB",["52"]],["ywgpHwyjq@fFtJbFbF~DtB~@T~@@",["52"]],["s_fpHyspq@mDxDmDjBkMnCoh@nMkLlEuKnG_FvDiIxHm^|b@sD|D_`@h\\gNpKsSzR",["S1","S9"]],["s_fpHyspq@|IeQxB_FhAmDhAyEdAwHb@gJKeOuNk`CQ}Hi@yp@FoKXeJrJceC",["S1"]],["mpeoHwf_r@~{BfXnU`CbGJx|BNjGb@nQzD",["S5","S6"]],["mpeoHwf_r@m}@uKoRcB_CDmB`@aNzG",["S5","S6"]],["iukoHgk|q@xe@um@`_@gb@~DgDpN_I",["S5","S6"]],["aztoHaf|q@vAcFz@wB~BiE|C}DtC}BpDgBhCq@~AUnBGna@zChEj@|DfAdN~FfOtE~CzAlIfFtCrAhEzAnKhCpi@jIxI`AvGD|CQlFs@nt@_OtBs@fBaAtBkBjA{A",["S5","S6"]],["erkoHmn|q@z`@_h@f^mb@dEaEvQiK",["S5","S6"]],["uqeoHsf_r@cgAuMqGg@_CDkB\\}CnAmHtD",["S5","S6"]],["uqeoHsf_r@|iC`[fFd@tIVr~BPpE`@lQ|D",["S5","S6"]],["aj}oHwxeq@pG`]l@~AnAfA",["51"]],["ctdpHwzlq@IcEJuAtBqFfDcG",["53"]],["go|oHy``q@wAyD",["51","53"]],["_o|oHa``q@mAuF",["53"]],["}y|oH{baq@lK|e@Vd@t@PVZIdASJYK}A}G",["51","53"]],["}y|oH{baq@K_BZqAlJ_HrAsBN{AScBcL_Z",["51","53"]],["}dcpHko|p@rHNvIfA",["51"]],["g|cpHag~p@vBjEv@dClB~RtD`Qn@|Ax@bAtAp@rAL",["51"]],["uwgpHsyjq@kCuCuAb@gCVcDsD",["52"]],["uwgpHsyjq@bFpJbFbFvE~BTZlA@",["52"]],["kqapH}xjq@zEnPpAdF|AlIv@lC",["52"]],["kqapH}xjq@}@cCm@a@i@Ek@Vk@dAg@`@{Cp@gB?",["52"]],["eacpHetjq@zAi@bDqB|DiHh@m@f@Q|@DhBrA|AfDdCvAbAX",["52"]],["gucpHqxjq@hPvCvAK",["52"]],["}adpHwkkq@bIfPd@h@j@R",["52"]],["ywgpHwyjq@gCqCuAb@gCVcDsD",["52"]],["oocpHi|vq@xDtqA`AnIdNrw@XnCJjDK~Eq@rFiHnVkFt\\",["S8"]],["{icpHyxoq@mDdZIxEtAjY[zHiAhGcBjEiBhCmb@n^",["S8"]],["mwvoHwtvq@zUg]pDeGdEeJnC{IvBeK`AcHtL_sAvAoJ",["S5","S6"]],["i`}oHqzvq@fgCti@zB\\dFZfHWtCe@lBg@zGwCnF_EjBiBlOmT",["S5","S6"]],["aicpHkxoq@mBrNUbGJzHrApQJdFYdGcAlHmC`HqAlBuBtBeJlHaEvBuDbCoJbI",["S5","S6"]],["cbgpHmbjq@BJlA@",["51"]],["k}dpHyflq@t@g@jANrAeA",["52"]],["afrpHyeiq@h_@iQjFaD`LoJpBkCbGsJzCaDlCwArQeGzC}@bFu@rIa@tFBn[dCtD@hDS|Be@pDaBdFiEfSuRpKmQ|FkO|A}CtAeBtAiApBaAxA[xAI~AH~A\\dBr@jCzB~BpDxl@vvAvA~Dx@bDf@bD|A`Rr@jDr@xBvAtClB~BrBtAtBt@rCR~C[dFeCdDgC~J}LpIyLv^od@nIkLfN_M",["S5"]],["cpdpHw~kq@WqBuAeFm@c@u@Z",["52"]],["odbpHgdfq@CQ",["51"]],["wuepHkbzs@eHi@gGy@a_@wC{_@uCoXcB",["S6"]],["gibpH{{~t@qD{OeRku@g_@omA",["S1"]],["gibpH{{~t@`Wh`AxB|FtB`ElEhGhCfCzElDhLhFdNtFpB`@bAD|AKvBm@",["S1"]],["axppH{|`s@zCtGpM|[`cA`zB`FbK~HlNbFzHtG~I~hDfgErKbP`IfNdMrW",["S8","S9"]],["gfhoHyxyr@pw@j@fXQzH^rGjAdH~BfKxFlG`FdC~A",["S7"]],["k|dpHw}js@mxEiuC",["S7"]],["gfhoHgyyr@qpCoB",["S7"]],["slsoHsczr@hr@vAn`DbC",["S7"]],["slsoHsczr@wUm@uEk@wEaAkEwAmFiC{FuDyFgFgNaQieHokJ{EqFiDmCsa@aW",["S7"]],["suepHibzs@nIn@vGR~`@~CxS~B",["S6"]],["sxsoHyqws@h|@nHxFx@hHtBp]~OnDnBvB~A`CvCnZ|l@zGhKxCzDtDhDnBfApC|@zD`@xDMtDo@tNeE|VkFbGk@xC@hJo@",["S6"]],["acwoHcaxs@liBhN",["S6"]],["_gbpHqu~t@vG|U`L`c@xB|FtB`ElEhGhCfCzElDhLhFdNtFpB`@bAD|AKvBm@",["S1"]],["_gbpHqu~t@_ZqlAka@qrA",["S1"]],["{jooHkays@hc@`G~E`A",["1","6"]],["iepoH{gys@hC\\dDx@|OvB",["1","6","8"]],["_wpoH}kys@tP`C",["1","6","8"]],["slqoH{oys@dNbBlEX",["1","6","8"]],["ufroHquys@`YtD",["1","6","8"]],["ufroHquys@}[iE",["1","6","8"]],["musoHinys@vCwAjEcDbAyCV[b@MtAL",["1","6","8"]],["unloHuoxs@`@Gb@ZnArN",["1"]],["gimoHirxs@|ATtETpMl@jAE",["1","4","5","6","8"]],["gimoHirxs@iU}C",["1","4","5","6"]],["{wpoHclys@pQfC",["1","6"]],["wh`oHuuws@j@WlAKjGf@pCAhAL",["1","7"]],["uu_oHeuws@zSlB",["1","6","7"]],["w}foHuvws@j]`A",["1","7","8"]],["{_eoHcrws@o^oA",["1","7"]],["w}coHkows@ca@wA",["1","7"]],["u}coHkows@tWx@",["1","7"]],["ujboHukws@iY{@",["1","7"]],["gqaoHciws@{I]yAWwJ[",["1","7"]],["gqaoHciws@pIRvEu@hAl@|@I",["1","6","7"]],["wh`oHuuws@cAv@Wn@M~ASp@eA`AyKvA",["1","7"]],["uu_oHeuws@iAMqC@kGg@mAJoBnAWn@M~ASp@eA`AyKvA",["6"]],["uu_oHeuws@nStB",["6"]],["ea_oHoqws@~BPjAEjYeE",["6"]],["m`~nHiwws@fj@iI`NeB`Fe@vFW",["6"]],["mxhoHazws@oWs@gAUyAGyGMkBF}e@xK}ErB",["6"]],["apkoHklws@m@Jg@y@{Caa@MaAi@_B",["6","8"]],["unloHuoxs@|Bw@hN_D`@H^d@",["4","6","8"]],["_ptoHmjys@vUFROd@iA~@i@",["1","6","8"]],["_ptoHmjys@qLGkAt@}A?",["6","8"]],["apjoHslos@gAoM}@sDsB{FeA{GKeFd@iLM{F",["4","9"]],["apjoHslos@vGb`AfCx[",["4","9"]],["acjoHunls@zF|w@",["4","9"]],["ivioH}ris@{Cya@",["4","9"]],["ivioH}ris@pEtn@",["4","9"]],["sjioHq}fs@cDud@",["4","9"]],["sjioHq}fs@~AbWE~@aA|BJfA",["4","9"]],["aygoHql|s@_@WW@mN`H_MlB",["5","9"]],["aygoHol|s@XxACp@Wh@k@@",["5","9"]],["{~}nH_xws@th@}HbQwBnE_@jIO",["6"]],["w`_oHwqws@rBLhAE|ZoE",["6"]],["uw_oHyuws@|U`C",["6"]],["uw_oHyuws@uB@oHi@mAFuBrAWn@WzBWl@[VoA^}Gt@",["6"]],["otaoHuiws@~J^|AEpDs@lAl@~B[",["1","6","7"]],["qptoHejys@sL?s@dAeAfCg@\\g@WOeAJmAPUd@C",["6"]],["qptoHejys@xUJh@W`@cAf@]",["1","6"]],["oiooH{`ys@f_@|EhF~@",["1","6"]],["gimoHirxs@uWsD",["1","4","5","6","8"]],["gimoHirxs@jBVxS`AlBM",["1","4","5","6"]],["qmloH}oxs@lAc@fN_DXA^Tn@vA",["4","6"]],["sokoHilws@y@RSI[s@yCw`@YiB",["6"]],["i_ioHezws@wPg@uAS_LOwFbAc`@|I_EdB",["6"]],["mmioH}`ys@bE`DhDfAhA?",["3","7"]],["omioH}`ys@kBmAaJwB",["3","7"]],["}{ioHcgys@qNiIyB[",["3","7"]],["iojoHirys@{AGaJVw@_@mCyBqDK",["3","7"]],["wwkoHmjys@q@wIBa@Xi@l@]tBa@`Cx@bEV",["2","3","5","7","9"]],["wwkoHmjys@Cx@aAhCCd@h@pHf@lB@zA",["2","7","9"]],["sokoHilws@m@T_@KQYcDwb@HqA",["7"]],["iepoH{gys@hC\\dDx@hQ`C",["1","6"]],["gimoHirxs@jBVxS`AlBMXLHV",["1"]],["olloHunxs@|@`K",["1","3"]],["uqkoHufws@zE~p@",["1","2","4","9"]],["uqkoHufws@AqBRa@n@_@",["1"]],["qkjoHmyws@a]|H_EdB",["1","7"]],["qkjoHmyws@xIcBjKL",["1","7"]],["i_ioHezws@wPg@iBU",["1","7"]],["i_ioHezws@lXt@hIE",["1","6","7"]],["w}foHuvws@y\\_A",["1","7"]],["cvsoHsmys@lDcBvBwAdBcBz@kC\\[t@A",["1","6"]],["wfroHiuys@o]sE",["1","6"]],["wfroHiuys@rYzD",["1","6"]],["clqoHmoys@pMzArDV",["1","6"]],["q{goHuxws@d{@`C",["6"]],["gqaoHciws@{I]yAWqaAyC{|@_D",["6"]],["uw_oHyuws@zQhBbBQ",["1","6","7"]],["ii`oHsuws@~@e@l@GnIh@tBA",["1","7"]],["ii`oHsuws@u@l@Sb@[fCWl@[VoA^}Gt@",["1","7"]],["w}foH}vws@{]_A",["1","7","8"]],["mxhoHazws@pO`@dHH|@G",["1","6","7","8"]],["mxhoHazws@}Vq@",["1","7","8"]],["sgjoH_{ws@lDy@jBGdJRfBX",["1","7","8"]],["sgjoH_{ws@o`@~I}ErB",["1","7","8"]],["yqkoHafws@KqAFq@HYp@k@",["1"]],["yqkoHafws@xErp@",["1","2","4","9"]],["otaoHuiws@sFSeBYs_AsCk~@cD",["6"]],["s|goH}xws@h|@`C",["6"]],["otaoHuiws@sFSeBYuJY",["1","7"]],["_kboH}kws@gZ}@",["1","7"]],["q_doHwows@hXz@",["1","7"]],["q_doHwows@k`@uA",["1","7","8"]],["aaeoHmrws@g]mA",["1","7","8"]],["apkoHklws@m@Jg@y@yCi`@JyCI_B",["7"]],["ywkoHgkys@ArAaAhCCh@d@lGh@pB",["2","7","9"]],["ywkoHgkys@o@}HJu@b@c@pCq@`Cx@rCX~A?",["2","3","5","7","9"]],["{qjoHirys@oJTeEsC_CU",["3","7"]],["q|ioHcgys@uM{HaB]qBK",["3","7"]],["ilioHs_ys@sCqBsJ}B",["3","7"]],["ilioHs_ys@hCpB~@`@fCv@lBK",["3","7"]],["akgoHwcys@Mj@WVuF|AgHjC",["3","7"]],["e}goHizxs@}FfBqB`@oBL{CC",["3","7"]],["u_ioHsyxs@t@Kf@PT^^nBTVtCgArCV",["3","7"]],["olloHwnxs@P_A`OiD|@ATO",["3"]],["ofloH}fws@aCsZ",["1","3"]],["}dloHwous@PcINgXsAyR",["1","3"]],["}dloHwous@SnGErEHj@RRzB\\\\xBTZvCApAM",["1","3"]],["odloH{sus@_@zPFdAXVt@FlH_@^l@LbB\\Vl@C",["1","3"]],["odloH{sus@Vg_@w@yK",["1","3"]],["oeloH}`ws@kCq]",["1","3"]],["glloHunxs@jAdN",["3"]],["glloHunxs@Dq@\\YfN_D|@A\\Y",["3"]],["e~hoHuyxs@XBZXh@|BXZvCeA~DX",["3","7"]],["e`hoH_yxs@oG~A}ET",["3","7"]],["ongoHwcys@EdA[h@sOfF",["3","7"]],["a`roHa|}s@bC_ElFmK",["4","5"]],["cgqoH}x~s@uDTgAb@i@l@cCdF",["4","5"]],["cgqoH}x~s@tB?lAZz@p@~BbDj@^hAT",["4","5"]],["iwpoHuo~s@tIUZXNh@D~C",["4","5"]],["qkpoHuc}s@MsL]yIJsBl@_E@oB",["4","5"]],["qkpoHuc}s@RfKzAdJl@bLb@jEdBtKjAdDlAdB~@t@|@f@jD|@tK|A`BDdEQ",["4","5"]],["qmloH}oxs@lAc@fN_D|@A\\Y",["5"]],["ywkoHgkys@ArAeA`Dj@nIIbA",["3","5"]],["i~joHc}zs@qArA_@jBOp]Qd@]TuBG",["2","5","9"]],["whjoHwm{s@{A~@uA\\oEjCoHhH",["2","5","9"]],["arioHmz{s@qEr@u@VmMhI",["2","5","9"]],["arioHmz{s@xXiE",["5","9"]],["ssioHiz{s@rXgE",["5","9"]],["wsioHiz{s@gEx@kOrJ",["2","5","9"]],["kjjoH{l{s@i@ZuA\\cF|CwIrI",["2","5","9"]],["g`koHo{zs@e@n@SjAOr]M`@_@ZaDE",["2","5","9"]],["cxkoHkjys@?x@aApCh@`JM~@",["3","5"]],["mkpoH_f}s@VdNzAdJhA`QzAxJvAlEjBdClBhAhAZ~NzBnEI",["4","5"]],["mkpoH_f}s@K}J]oIH{Al@{D?cF",["4","5"]],["uxpoHgp~s@pADnHSb@b@NfB",["4","5"]],["qhqoHcy~s@hCGhB^lAfAjBjClAn@",["4","5"]],["qhqoHcy~s@gCNyAr@u@fAmC|F",["4","5"]],["a`roHa|}s@bC_EdEwI",["4","5"]],["cxkoHkjys@e@eHS_@WK}AT",["2"]],["yqkoHafws@}D_h@HaC",["2","9"]],["mukoHuzts@zAQzGqFTc@Be@cAiN",["1","2","9"]],["_xkoHoyts@hC[b@QrFkE|@aAFgAaAaN",["1","2","9"]],["}qioHic}s@AuDScDCaPq@}CAiDBiA`AsDBs@[o@YEWLQ\\EpA",["2","9"]],["usioH_z{s@fB]Tm@cAq^AkF",["2"]],["uqkoHufws@{Dmg@JyCI_B",["2","9"]],["s~joHsqrs@|Cvb@",["4","9"]],["iekoHmbts@tExo@",["4","9"]],["iekoHmbts@MqBNkDqDih@",["4","9"]],["qnnoHyuzs@w@mBk@e@iGy@gC?",["4","5"]],["qnnoHyuzs@^`AJtAqAf[",["4","5"]],["wonoHutys@aAfULhAFLdNvB",["4","5"]],["{jioHm_gs@fB~XE~@aA|BJfA",["4","9"]],["{jioHm_gs@oC_`@",["4","9"]],["ivioH}ris@|Enq@",["4","9"]],["ivioH}ris@{Cya@",["4","9"]],["kbjoHwils@dF~r@",["4","9"]],["apjoHslos@vGb`A|Cv`@",["4","9"]],["uqkoHufws@}Deh@MaAi@_B",["4"]],["konoHiwys@gAxWLbAXZpIjAfEz@",["4","5"]],["knnoH_vzs@d@rAFhAmArX",["4","5"]],["knnoH_vzs@}@wBi@a@}Gy@sDF",["4","5"]],["qzgoHwf|s@wAyBy@IwIfEaO`C",["5","9"]],["iekoHmbts@MqBNkDwDah@",["4","9"]],["iekoHmbts@hE~l@",["4","9"]],["__koHmtrs@hDpe@",["4","9"]],["gkcpHcwys@dRj@|aAtHlOnB`ELpJGlDLx[nC",["S6"]],["ea{oHmsxs@snB_O",["S6"]],["acwoHcaxs@cdB}MsDOkR{A",["S6"]],["a`hpHirst@`FzAxf@nQ~Cd@lE[",["S2"]],["k|dpHw}js@phC|}A",["S7"]],["exdpHg{js@ndCb{A",["S7"]],["exdpHg{js@_~EcyC",["S7"]],["acwoHcaxs@cwAyKsc@cE",["S6"]],["{_{oHctxs@qUuA}jA}IkMuA",["S6"]],["unloHuoxs@|Bw@hPkD",["5"]],["s}koHgtys@bBSXTPl@`@tH_ArCCt@h@dGh@pB",["2"]],["arioHmz{s@r@OVs@}@u]CsI",["2"]],["wqioH{e}s@U}GCmOw@{CAiDYaBAgC",["2"]],["yqkoHafws@}Dih@YiB",["4"]],["wqioH{e}s@BrIx@h\\Nt@f@P`S{C",["2"]],["wqioH{e}s@U}GCmOw@{CAiDYaBAiC",["2"]],["}qioHic}s@AuDScDCaPq@}CAiDBiA`AsDBs@[o@YEWLQ\\EnA",["2"]],["oukoHszts@oAR",["2","9"]],["qptoHejys@xUJh@W`@cAf@]",["6"]],["qptoHejys@sL?s@dAeAfCg@\\g@WM_@HsB^YbB?",["1"]],["_ptoHmjys@qLGcAp@YB",["1"]],["iojoHirys@{AGaJVw@_@mCyBqDK",["3","7"]],["wwkoHmjys@q@wIBa@Xi@l@]tBa@`Cx@bEV",["2","3","5","7","9"]],["glloHunxs@jAdN",["3"]],["ywkoHgkys@o@}HJu@b@c@pCq@`Cx@rCX~A?",["2","3","9"]],["q|ioHcgys@uM{HaB]qBK",["3","7"]],["akgoHwcys@Mj@WVuF|AgHjC",["3","7"]],["e}goHizxs@}FfBqB`@oBL{CC",["3","7"]],["u_ioHsyxs@t@Kf@PT^^nBTVtCgArCV",["3","7"]],["w}foH}vws@{]_A",["1","7"]],["mxhoHazws@pO`@dHH|@G",["1","7"]],["}qioHic}s@@jFp@tWNrELXf@JzTiD",["9"]],["e`koHi{zs@k@hAKrAMx\\Qd@YRgDG",["2","5","9"]],["{jooHkays@hc@`G~E`A",["1","6","8"]],["ea_oHoqws@~BPjAEjYeE",["6"]],["m`~nHiwws@fj@iI`NeB`Fe@vFW",["6"]],["unloHuoxs@|Bw@hN_D`@H^d@",["4","6"]],["i_ioHezws@lXt@hIE",["1","6","7"]],["w}foHuvws@y\\_A",["1","7"]],["q{goHuxws@d{@`C",["6"]],["qmloH}oxs@lAc@fN_DXA^Tn@vA",["4","6"]],["iwpoHuo~s@tIUZXNh@D~C",["4"]],["qkpoHuc}s@MsL]yIJsBl@_E@oB",["4"]],["i~joHc}zs@qArA_@jBOp]Qd@]TuBG",["5","9"]],["whjoHwm{s@{A~@uA\\oEjCoHhH",["2","5","9"]],["{jioHm_gs@fB~XE~@aA|BJfA",["9"]],["{jioHm_gs@oC_`@",["4","9"]],["ivioH}ris@{Cya@",["9"]],["kbjoHwils@dF~r@",["9"]],["exdpHg{js@_~EcyC",["S7"]],["oiooH{`ys@f_@|EhF~@",["6"]],["unloHuoxs@`@Gb@ZnArN",["1"]],["oeloH}`ws@kCq]",["1","3"]],["}{ioHcgys@qNiIyB[",["3","7"]],["}qioHic}s@AuDScDCaPq@}CAiDBiA`AsDBs@[o@YEWLQ\\EpA",["2"]],["i~joHc}zs@qArA_@jBOp]Qd@]TuBG",["2","9"]],["mkpoH_f}s@K}J]oIH{Al@{D?cF",["5"]],["uxpoHgp~s@pADnHSb@b@NfB",["5"]],["konoHiwys@gAxWLbAXZpIjAfEz@",["4","5"]],["acjoHunls@zF|w@",["4","9"]],["ivioH}ris@{Cya@",["4","9"]],["sjioHq}fs@cDud@",["4"]],["wonoHutys@aAfULhAFLdNvB",["4"]],["_ptoHmjys@vUFROd@iA~@i@",["1"]],["iojoHirys@{AGaJVw@_@mCyBqDK",["3"]],["unloHuoxs@|Bw@hPkD",["5"]],["clqoHmoys@pMzArDV",["6"]],["{jioHm_gs@fB~XE~@aA|BJfA",["9"]],["unloHuoxs@`@Gb@ZnArN",["1"]],["e}goHizxs@}FfBqB`@oBL{CC",["3"]],["ssfpHsgfu@zDy@pFHlCj@rCvAzB~AfCrCpf@bt@jCjFtCdI",["S1"]],["_tipHcdeu@r[iFvbAe[",["S1"]],["ssfpHsgfu@zDy@pFHlCj@rCvAzB~AfCrCpf@bt@lDlHvDdL",["S1"]],["eutpHqivr@lPzbAb@pFFzG]jGiAfHaZhuA",["S2"]],["uslpHetkq@dSsRhGsJpD_HvKq\\dAwBpAcBxCwBhDeArAIpAF|Cx@zA|@tBtBrAzB|@zBvAvGlAzRtAnHnb@ddAz@dDpDtTv@xC",["S8"]],["uslpHetkq@uChC}D|BkFjAoBPuDAo[eCwJBqEXcFt@_PdFoE|AmCvA}@v@}AhBcGrJqBjCaLnJkF`DsOjHyAfAuKjF",["S8"]],["s|gpHqrmr@opC{fD",["S1"]],["orlpHuokq@}EdFgC~D}BxFoMj_@mElKxFiPbA}GJsDU_Gm@sDaAuCqAuBy@y@uA}@gBk@cIkAiI[{FByEXyEr@mVzHoAl@wBzA{AbBgGxJoDjE_L`JeIfEqJnCoOpH",["S1","S9"]],["k}aqHoy}q@gAjMItGJjGr@~I~En^f@~GJvEQlLc@hFy@xFcAnEwAnEuNd^yAnCwBxCyKxLsKtN_BtD{GlT",["S2"]],["cd`qH{u`r@yn@`dAqAhCaBtEyBhK",["S2"]],["ad`qH{u`r@vEaIhC{GtAaHx@yKBuEMqE]qEm@eEeBuGiEuKw@iCcAeGe@uHJeGr@wF|FwR",["S2"]],["md{pH}~kr@~^o_@fCgB~BaAjASpAGfBJ|SpE|r@lGpDClB]jBq@zA_A|GuGbL{LvB_DdCcFfQyj@|I}b@",["S2"]],["md{pH}~kr@eBfCsAtCyH|S{AnCeBnBmBnAcBl@_BRgMNkB^sB`AoCdC_JhKaKxHeCpCiAtBgKhW{ApBq@n@oDlBeQ~F_FpDqCxDy@vA_CvFq@bCeAfGW|DAdE~@xUAnFa@~Ek@xCcAlD",["S2"]],["uwlpHoqkq@cClBmB`AkCr@sD\\uBDkBIaZ_CuFCcCDoHl@aHxAuQdGsKnGgH|FyRnQ_JjHmTtK",["S1","S8","S9"]],["}`{pHoalr@{CfDsAzBcBxDkGxPyAlCgBrBoBpAkCt@_OXkB\\sBbAkCdC_JdKeKzHsArAuBnDkKjW}ArBwC|ByQfGsBbA{C`CuCzDwDjIq@`CeAdGW|DAdELxGj@~LAnFa@~EkB|H",["S2"]],["}`{pHoalr@r[s\\xAkAxAw@zC{@lAGhBL~SlE|r@rGzB@fBQhDeAzA}@~AsAxRyS|D}G|D_L`K}[fJ{`@",["S2"]],["{ttpHwivr@fPpbAf@~FD~G]nGw@fF}[v}A",["S2"]],["ad`qH{u`r@{n@`dAqAhCaBtEuBtJ",["S2"]],["g}aqHcz}q@o@xF[dFItGJjGr@~I~En^f@~GJvEQlLc@hFy@xFcAnEwAnEuNd^yAnCwBxCyKxLsKtN_BtD{GlT",["S2"]],["iwlpHipkq@jWqVpKmQxHyRvBuCjCmBtCy@xCEdDr@~@b@lBzAz@`A`BnCxl@vvAvA~Dx@bDn@pEl@pI",["S8"]],["md{pH}~kr@~^o_@fCgB~BaAjASpAGfBJ|SpE|r@lGpDClB]jBq@zA_A|GuGbL{LvB_DdCcFfQyj@|I}b@",["S2"]],["_bypHehws@jBuAtEmE`AoAnAiCx@}C^yCDmG_@cEeA{E}ZabA",["S3","S4","S5","S6"]],["wxzpHsc|s@`FbHrBfBnDbBbIpC`DvBfAdArC|F~AhF",["S1","S2","S3","S4","S5","S6","S8","S9"]],["k{zpHi}}s@_@jHgCvTBdFn@vFj@tBzC|F",["S1","S2","S3","S4","S5","S6","S8","S9"]],["k{zpHi}}s@XyJOiCqBkNOsCCcX",["S1","S2","S3","S4","S5","S6","S8","S9","U6","U7"]],["g_{pHqz_t@g@yIAeDV_If@yEtAcHlAgDjAqBlD{D",["S1","S2","S3","S4","S5","S6","S8","S9"]],["sqzpHesat@xFyFtAs@jBi@tAMzACdIx@jPzChDrBdCrDdBbFxBhM",["S3","S4","S5","S6"]],["w_upHsl|s@wDIyCNkGpA{G`DqIxGsC`AuBDeDw@yBgBmAmBkAsCyCoJ",["S6"]],["w_upHsl|s@~pAhK~Pv@|Ev@hHlBpDn@pVrAnZ~BnTvB",["S6"]],["k}npHom{s@vi@rDpzAhL~b@jDjPbB",["S6"]],["gsxpH{lcs@mCwd@q@s^`@guAVgF^}C~BuL",["S1","S2"]],["g`wpH}|os@A`y@w@|Q{AtNqAbImBtIwHnWmM`e@iNni@",["S1","S2"]],["g`wpH}|os@KybCSsHi@cF{@qEkAkE{h@wgByNyi@yNsf@",["S1","S2"]],["_snpHmais@|CzRZbD|Bv^XhHBhFYnHkAjJ_BnGcBhEwBxDiDzDwDfC}E|A{CVwDKsAQ_LmCuDa@mEJiFvA{D`C}B|BeBbCqA~BsAbDaCnJeAjKUfLTlP`AlMhBtK~BfJbCpG|FlK",["S8","S9"]],["wltpHuzus@aR~KcWzQeQzHwDr@aEM_B_@{Aq@aEwCcDoEuCyG}H_\\e[}dAs]ynA",["S8","S9"]],["wltpHuzus@vIkHfYoS~Bw@~AS~ACdBNjCx@bBbAvBxBzBxD`BdFxGt^",["S7","S8","S9"]],["iuopHurms@fB{x@_@sJgAyGeBkF}@iBgCkDgByAiCoA_Ci@{MMwC_@aBi@uCeBsByBqBcDyAwDgAwEw@uHg@yl@sAsYcBqN}CkP",["S8","S9"]],["arxpH_y`t@pA`IfAfElBjFdCpF`F`N",["S3","S4","S5","S6"]],["inypHguzs@x\\tkAbg@vbBpBjFfAfBxA`BbCdBxC~@hDNvCe@jVsJxf@{]",["S7","S8"]],["yzsqHitws@`ByA~C}AbCe@xBGxCXxLxDhCDxF]lDEfBRtVdFlEbB~C|Bz]j\\dDnDrCtE`HfPxAjG\\hEBxEO|EaFtt@",["S5"]],["osxpHylcs@xA`VpBhM|FjVnIlZ",["S1","S2"]],["khvpHgq|r@mNk{@uAsGqAsDaIsN{J}VuFeP",["S2"]],["khvpHgq|r@dr@tfE",["S2"]],["ibypHciws@oClAoDl@aSL_LQ",["S3","S4","S5","S6"]],["kmzpHkews@{K\\kIF{BXeBl@aCrA_A~@}FfJuB|D",["S3","S4","S5","S6"]],["up`qHybws@lt@v\\nJjDnQfIrTzKrBr@nBTjCA~Co@|BkAlB}AjBcCxAkCfEyI|DuJ",["S6"]],["up`qHybws@iHsCeFuCsGwF{y@cp@sEcE",["S6"]],["otopHqrms@w@dW@`E\\jFbCjT~@bFr@nBrE~HzD|IpApFdAbGpCpStChQ",["S8","S9"]],["ajypHwelt@iBsj@CoELwE\\oEbByM",["S1","S2","S8","S9"]],["_iypH}snt@jDaWrCeLfJyb@l@uDV_FImEs@kM}@sV",["S1","S2","S8","S9"]],["qoxpHmibt@nAiGj@iH?eHWuEq@{EiAqEsFaN}AiFaAgG[iGKoUuBcaAkAs}@",["S1","S2","S8","S9"]],["gdypHqvit@YyM}Ay^aAq_@",["S1","S2","S8","S9"]],["muxpHcvrt@i@}S@gKZmP^}GlAyJbBmHtAaEpDgH`B{BnCqClv@cm@",["S1","S2"]],["a_gqHutat@yAwBiBoDmBcFqAwEqBqLs@gKIeGHqHnGqwBFiH_@mHy@mF{CiKeBkE",["S6"]],["orgqHy|ht@eCuDgBaBsAw@uMsEgCm@gHaCkIiEiIsC",["S6"]],["mmiqHk~it@mUgIyJaCsd@mPyEyCqLuKwYuU",["S6"]],["exqqHeult@`^_CxCa@vx@kF~GE~CVzCh@`GrBpEjCrSlP",["S6"]],["kv_qHwq~r@cCqBaDgBkKoEkEwAwNiDgFoBaGeEeXwUuMuK",["S3"]],["kv_qHwq~r@nBdCx@`Bt@tBx@fE\\|E?lD_@hFm@~CaB`FkDhG_XzW",["S3"]],["sqzpHesat@xFyFtAs@jBi@tAMzAC|CTnTdD|B?`BSdDeBzAkBn@aArBqF",["S1","S2","S8","S9"]],["aqxpH}ebt@tA{Ex@kF^_HEgGa@mFkAsG}@sCkGwOcAmEi@uD[iGKoUuBcaAkAu}@",["S1","S2","S8","S9"]],["wqzpHcsat@|F{FtAs@jBi@tAMzAC|CTnTdD|B?`BSdDeBjCmD`A}B",["S1","S2","S8","S9"]],["kwqpHi~xr@fhDzbE",["S1"]],["{gvpHolwt@p^aYhDwAxAKnBJ~Af@`K|EzPjGnElBlAv@bDhCrb@jb@lGrDpC`AbDt@|FXn_@gA",["S2"]],["exipHeltt@wH}Csm@sTmdAc_@kCs@oBW}BEulAnD",["S2"]],["a`hpHirst@m\\cMuYwJ",["S2"]],["w|qpHi`us@vGf_@bA`DnAlC|C`EnBrAfHnDzfDhsB",["S7"]],["exqqHeult@uF^eDDim@`Eid@pCcB@aCCsCU_F}@gUaH",["S6"]],["{liqHq_jt@yQmG}IgB{PgFyWsJyEyCqLuKiYiU",["S6"]],["s||pHwaps@_x@nP_EfAuCtAmCrBoCrCuo@du@iFdEsDjB}Ah@oE~@_OdB{oC|X",["S5"]],["q{hqHmuks@jiAmL",["S5"]],["q{hqHmuks@qj@vFoDDwFo@yBs@yC}AsBuAiCmCcDcGsDmL",["S5"]],["uokqHgpls@mMm_@cF}MsCmGgDmEcWoV{I{HuLwGgi@sXwBmBoAoBcBiFg@sDQiD^gTpAiT",["S5"]],["e||pH{aps@mx@rP_EfAuCtAmCrBoCrCuo@du@iFdEsDjB}Ah@oE~@_OdB}oC|X",["S5"]],["w|{pHgkvs@oCdG}AvGa@lGNrG~@pGdF~XlFjPrJlXnBrHr@|FVtFEvGYtEu@fGaBjHoBxEuBzCmAlAcFxCqFxBoZ|G",["S3","S4","S5"]],["}zsqHqtws@bByA`D_B`Ce@zBGzCZnIrCjB`@fCHfLe@pEp@jSdElEbB`D~Bx]j\\dDlDnCjE~EtKhA`DxAjG\\hE@`I{Cre@iA|U",["S5"]],["_}hqHeuks@ci@nFoDDwFo@yBs@yC}AsBuAiCmCcDcGsDmL",["S5"]],["}}wpHmk_t@dEhMbDfPfC|PfFlQdBpKrA~F",["S6"]],["gzeqHus}s@Zug@OwMg@uKi@aFcA_GeCgJeBaEcCoEsDuE_JiIgCyC",["S6"]],["skcqHijys@{IwGyXmU_DwCiM}JmCwCaEmGuCqHuAaF}@cEkAyJe@iOVmX",["S6"]],["enfqHkz`s@oZji@cChFyC|IuClN",["S4"]],["enfqHkz`s@fOuWlEgGxBwBdEaDtq@ib@rQ{QrPoO",["S4"]],["mt`qHg`gs@{GbMiNvXqBbD_EvEcKfKgSlT",["S3","S4"]],["mt`qHg`gs@tHeP|l@slAzBqFjBeG",["S3","S4"]],["}{|pHo`ps@aTxDwEdBaBvAsAjBeAhCw@zCaArHmJrtB}AbMwB~J",["S3","S4"]],["qt`qHsags@gW~g@sBdDiE`Fs_@~_@",["S3","S4"]],["utupHmo}r@~eBbvBrUfX",["S1"]],["ezwpHeu`s@xIbYhHbRpB~DrCnDrGzF~CfDpZz^",["S1"]],["yc|pHqbau@pFv{B",["S8","S9"]],["muxpHcvrt@aAqTcA}HsAkGcNy`@m_@olA{c@caBoBmIgBwLo@_IiBas@",["S8","S9"]],["chvpHulwt@xNiL~NqKhDwAxAKnBJ~Af@`K|EzPjGnElBlAv@bDhCrb@jb@lGrDpC`AbDt@|FXh`@iA",["S2"]],["og~pHm{ht@SyPYsFa@{Ck@oB}AeCaHqE",["U4","U7"]],["kw~pH_hjt@cSqMuCgC",["U4","U7"]],["ep_qHyzjt@_BkByAiCgJgU",["U4","U7"]],["ga`qHwxkt@wG{PaCiI",["U4","U7"]],["mh~pHaqrs@aEnGwC~CwRzO",["U7"]],["_g_qHurqs@_OjM",["U7"]],["_w_qHidqs@}\\~Z",["U7"]],["s}ypHai}s@f@DfCi@vCeA~B}@hFeDjDmCvFkFzCoDnBsC",["U1","U2","U3","U8"]],["g_xpHcq_t@cDpHcIfWaCzD",["U1","U2","U3","U8"]],["_nkqH}cls@mDeJs@u@w@Gy@v@eGjNm@bAeBjB",["U3"]],["_{lqHsojs@nBaLzAyFdBsD~JiO",["U3"]],["_{lqHsojs@c@dC{@rC_Tle@",["U3"]],["ginqHwegs@rK_g@rHsQ",["U3"]],["ginqHwegs@}ApK_BfS",["U3"]],["ctnqHsvds@|@sM~@iH^kU",["U3"]],["ctnqHsvds@QbEBbSXbG",["U3"]],["ecdqHemxs@}BhCiEzJu@pCwC|OaA|C",["U1","U3","U8"]],["cecqHewys@aAvDgAxCoArAsDzA_B|Au@pAkEfL{@lAuCvC",["U1","U2","U3","U8"]],["ekbqH}vzs@_VrX}AbE",["U1","U2","U3","U8"]],["gsaqHoo{s@yJ~KgHlG{AbB",["U1","U2","U3","U8"]],["wn`qHmb|s@kE\\sR~GsD`C{CzC",["U1","U2","U3","U8"]],["ij_qHoq|s@iHhCuCXiAZoNfGsCX",["U1","U2","U3","U8"]],["ij_qHoq|s@xCw@tIgArCk@|Ke@",["U1","U2","U3","U8"]],["kj}pHab}s@oDlByBv@cJbCmIT",["U1","U2","U3","U8"]],["}e{pHi{at@BeNRkFRgAhBiEdLmS",["U6"]],["k`{pH{q_t@Y_V@oLk@iGuAqH[wGBiI",["U6","U7"]],["}{zpHcd~s@]zJe@zGuBhRwArJ",["U6","U7"]],["od{pHmp|s@wBlM}C~LcHjV",["U6","U7"]],["qa|pH_ays@\\{Pb@iGxDoUjB}I",["U6","U7"]],["qa|pH_ays@a@tJ{@|Fo@nBgFnKs@vBeA`F",["U6","U7"]],["aq|pHqrws@iA~E}BxGy@dD_CbNyCvM",["U6","U7"]],["ow}pH{nts@nEcHxCiG|AoIhF{S",["U6","U7"]],["ow}pH{nts@eAzAa@T]AmFeBwADqItE",["U6"]],["as_qHqnss@rLMhAa@bAyAdBqFhAwBxC_DfEoC",["U6"]],["mcdqHimxs@qBxBaHnOk@v@a@`@kDdBeF`B",["U2"]],["a{zpHyd~s@bBj@bC~BfDjGnG|H`CnAlCf@",["U1","U2","U3","U8"]],["a{zpHyd~s@aN{AiALwC|A",["U1","U2","U3","U8"]],["eq{pHid~s@sJ`FoA`Ai@~@mAbEyA|Bk@^i@HaCM",["U1","U2","U3","U8"]],["sl|pHgn}s@uFEwP`GqCdC",["U1","U2","U3","U8"]],["a_eqH}ows@s_@dL",["U2"]],["u_fqHwbws@cFvA}AJsBEwC}@oDqCwBaD}B}E}HgWoCwKy@uBqMgRsFuGcA}AaBuD",["U2"]],["}jhqHq_zs@qC{GcAiDgFkZ",["U2","U9"]],["{xhqHci{s@sBeK_AcCkBoDsUi]kAeAcAe@_QeCyAEkBTgAb@eAv@eP`PcClA",["U2","U9"]],["}nkqH}m|s@uKzEmPrFaC~AsA~Amf@xs@{A~E}A|Ou@tEm@bB_KhR",["U2"]],["i_`qHazws@}AtFo@rA{BbC_DpEsAxA{EvD",["U1","U9"]],["uqbqHqcvs@~BPxEhAdAJfDWdBe@rFsBlDsB|M_JbI_G",["U1","U9"]],["spcqHolus@vDiBp@q@xBeDfB{DbAaAfBeAdC_AtB[fB?",["U1","U9"]],["krdqHsnus@bBJfKbBlGH~Ge@\\O",["U1","U9"]],["}udqHqbws@eCfHcGjLo@bE?hDVvD`@fCf@vA|@nAvAl@rHd@",["U1"]],["ivypHca{s@`A}AxB}BfAsDr@eEP_CHmBGmE[cC_CcHqGkKg@uA_BgGKcB",["U4","U5"]],["sgzpHga_t@|Dh[n@dHdAjQ",["U4","U5"]],["sgzpHga_t@kAuL_@sBc@}AeAsBoAm@uEHmCM_E\\",["U4","U5"]],["yg|pHuo_t@rACrAUxEgGbAu@jBy@|@?lBb@rAjAfK_@",["U5"]],["yg|pHuo_t@eCDcFi@yHE}K`CcBr@",["U5"]],["_m}pHik_t@_Bz@}C|B{DfAqBXwEB",["U5"]],["wf_qHcd_t@~FhA|Kg@tKV",["U5"]],["wf_qHcd_t@mGmA{EYyKlCiEzASCYa@i@wC",["U5"]],["_u`qHco`t@`Hbh@",["U5"]],["_oaqHkg`t@tUoKh@AZZb@|B",["U5"]],["_oaqHkg`t@cO|F{DnB",["U5"]],["_ebqH}{_t@wMfH{Ap@iCr@",["U5"]],["}zbqHoo_t@wCZgA?cD]iAe@cGaF",["U5"]],["c|{pHkbys@rEhAxIdDrAZvBLjBGfB]hBy@bBoA|BcDr@aB",["U4"]],["wuypHc`{s@gCfF{Lh[yHhT",["U4"]],["_b{pHwy_t@gK^sAkAiBqCgBiOaIaW",["U4"]],["_t|pHiobt@nQff@",["U4"]],["wf}pHmuct@uFkIgAw@cEiAiVoEqF{B",["U4"]],["wf}pHmuct@`AbBtO~a@",["U4"]],["og~pHuzht@\\vJKl@iAlBOt@RdOKdBg@rBeAxAmQbMo@p@mH|Oy@~Bs@zCa@`Eg@~U?jEZlE|@lC`A~Af@`@n@RhFh@lDp@~D\\",["U4"]],["k{}pHwqss@PlE]lCcErKoEnH",["U7"]],["aw}pHaots@{ClEi@vBz@bR",["U7"]],["ed{pHm{at@BiVC}FQeE}AkHeB}EaDmH",["U7"]],["y`|pHizdt@xAnE`MdX",["U7"]],["y`|pHizdt@s@kBeAcByQiQ}DoE",["U7"]],["m}|pHuyet@sFaHmAoCi@}BkBwMaDgL",["U7"]],["gq}pHeggt@gAkEgAuC}AqCiG}ImCmHi@uDWqI",["U7"]],["ow}pH{nts@qC~Di@jBC|@|@zP",["U7"]],["q{}pHuqss@R~DUvBkEnLmEjH",["U7"]],["evdqHqbws@qB`GmGxLm@dDKjBBrBpAbWDzGAfBUbCWpAy@rB",["U3","U8"]],["mdeqH}qts@gGnMg@nDeAxOa@vByAbD",["U3","U8","U9"]],["_teqHgdss@eCdFyBlGwBtKgGhRqHpNgCjD{DbEwHtFaKfQ_B`BkAh@sQvEyHzFiHhG",["U3"]],["ajjqHmoms@cBlBg@fAqBhIqBd`@g@vCcAnBgAdAuAd@iABmA[k@]sAcBkFaK",["U3"]],["czhqHcfos@{HtG{`@ph@eClC",["U3"]],["wsnqHgtcs@n@~LS|GaAtM",["U3"]],["mdeqH}qts@x@sBVqATcCNwHr@cDrA_BfA[vAE`DP",["U9"]],["_teqHgdss@_EjIaAhAyA\\wAa@k@q@i@uAw@eKkAsEgAkBiF_FyHgL",["U8","U9"]],["}jhqHq_zs@`BtDbA|ArFtG|EfHbApCdArGTjI_@|Gk@tD}GvZg@vEQrFR|HlAxIjAbEpDjI",["U9"]],["itgqHmous@vM`ZvH~L",["U8","U9"]],["c}_qH{|at@cAYoAGy@m@kGmO",["18"]],["whaqHyybt@`GiAz@A~@h@~A`Ct@Vl@E~BwAh@Cj@f@`C`G",["18"]],["khbqHodbt@jJoB~@_@vMsMdAu@h@O",["18"]],["a|bqHm~at@tRaE",["18"]],["ynxpHwk}s@hCnKpHhX",["15","16","18","19"]],["}`xpH}e|s@Z|@XJ^OdAqA",["15","18","19"]],["_|wpHwf|s@dEmFhAu@fHk@nGQ",["17","18"]],["qnvpH{f}s@hGfN@r@Sl@_@LoKr@cCJ_CKiDT",["18"]],["yyvpHyz}s@fJ|R",["18"]],["itxpHge`t@]iCFqDo@{Ce@Su@\\",["18"]],["gtxpHee`t@bDfO",["15","16","18"]],["coxpH}t_t@d@`B`@n@b@T`Dr@f@STBfAnC",["15","16","18"]],["obxpHaj_t@ZjBvBhGFfAYd@wIjG",["15","16","18","19"]],["swxpHkg~s@hMcJ",["15","16","18","19"]],["swxpHkg~s@W\\Av@rH|W",["15","16","18","19"]],["my{pH{b`t@hI~HVHdNu@",["12","18"]],["my{pH{b`t@{AwAkC{AgDmAuEy@sCuBkAe@",["12","18"]],["ss|pHsq`t@kB]aHE{L{@",["12","18"]],["}m}pHst`t@kE[u@Qm@o@yBwE{@q@}By@",["18"]],["aa~pHuaat@wNyE",["18"]],["we_qH}qat@lOxFnCr@",["18"]],["c}_qH{|at@jV|I",["18"]],["{x{pHciws@jFcHdKaGp@yA",["16"]],["eg|pHqrxs@rBt@`@t@fE`d@Tx@XPTCd@g@",["16"]],["eg|pHqrxs@mGyBa@JgHbOaAvCwAvCaA^wBT",["16"]],["qd}pHuzws@yQ|A",["16"]],["kw}pHwwws@oNn@{B^{Gd@}HEwKb@",["16"]],["ij_qHcsws@mBMmNoFe@Lu@dC",["16"]],["g`xpHcbet@z@nXBrNh@fLUrD[vAaDvG",["15","16"]],["g`xpHcbet@gBaY",["15","16"]],["ocxpHe|et@s@{Js@kEy@aJHk@t@}A",["15","16"]],["qfxpHy}ft@l@oAHo@mA}PLeQ",["15","16"]],["yfxpH}eht@PiHBeW",["15","16"]],["cfxpHqgit@@mDWoDkAaEMqAd@uMEuBi@aBmAoAi@mAeAgI",["15","16"]],["cxxpHmd~s@Ek@Ti@jKmH",["15","16","18","19"]],["}cxpH{m_t@n@jBd@fCrB|FBnAcBbBqI`G",["15","16","18","19"]],["{nxpHwt_t@h@fBh@h@jDv@~@Q\\b@",["15","16","18"]],["wtxpHsg`t@xA|H`BzG",["15","16","18"]],["wtxpHsg`t@Iw@F{Dy@{D",["15","16"]],["svxpHcu`t@aBeIw@yO",["15","16"]],["{oxpHedbt@uAvCcGrJQf@EjA",["15","16"]],["{oxpHedbt@fKiU",["15","16"]],["wd{pHw_bt@DkCRg@VOtG{CX@pBbATZFr@o@vN",["14"]],["wd{pHs_bt@Ix@_@NqA[{CuBOm@@sBOu@eAmBuBmB",["14"]],["it{pHoobt@iAo@cDsEuAuAg@iAs@oCoAoK",["14"]],["um|pH{cdt@jG~On@fD",["14"]],["um|pH{cdt@gCqFuGmIgB_D",["14"]],["{}|pH{zdt@mCcFaCsF",["14"]],["}m}pHst`t@e@GS]w@uI",["12"]],["}w}pHwdbt@lEfc@",["12"]],["}w}pHwdbt@UgCFy@zD{G|AgD",["12"]],["cp}pHqect@W`Fn@pBE~@",["12"]],["cp}pHqect@\\_FjDkH",["12"]],["yi}pH}uct@h@kA~ByJx@uB~BuL",["12"]],["u~|pHqudt@pFkY",["12"]],["a}|pHu_kt@oPan@AqAlAsA",["12"]],["el}pH}slt@rDiD",["12"]],["gtypHei{s@{@nA_AzE{DnL",["11","14","16","17","21"]],["esypHoqys@oJq[Ew@ZmA",["11","14","21"]],["esypHoqys@xJ|\\",["11","14","21"]],["exxpHskws@{@cEiLy`@",["11","14","21"]],["exxpHskws@XbBTp@z@nA`H~U",["14"]],["wkxpHmmvs@pEvO",["14"]],["eexpHu|us@bGrSKdA",["14"]],["cjxpHubss@~@|V\\~E",["11","21"]],["egxpHwcrs@ZbH^n\\Kdp@",["11","21"]],["uexpH}kos@Jpj@",["11","21"]],["iexpHk`ns@Fxc@",["11","21"]],["aexpHq{ls@Lx\\b@tK_@tOA|ILjF",["11","21"]],["cdxpHanjs@hCx\\",["11","21"]],["y_xpHgpis@rDne@",["11","21"]],["y{ypHka}s@w@iDYaGq@gFwByF",["11","12","14"]],["y{ypHka}s@jAbFdBfK",["11","12","14"]],["gvypH_n|s@dFh[",["11","12","14"]],["q~xpHqi{s@{CK{DaAyBY[]a@}B",["12"]],["q~xpHqi{s@|CFbAGtCqAvUqY",["12","17","21"]],["_|wpHwf|s@ZQd@J~F~HDt@Kh@qBhEQr@@~@n@vD",["12","15","19","21"]],["qkrpHc_~s@hn@o`B|@gAfB_AfFa@tEE",["17"]],["utwpHgj{s@JbCMpDJz@zGtS",["12","15","19","21"]],["gqvpHu`ys@eKdAo@Ew@q@]kAcD{YcAkEsAcE",["12","15","19","21"]],["gqvpHu`ys@jA@xJjCzAz@fB|A",["12","15","19","21"]],["}|upHmwxs@lCzBdD~A",["12","19","21"]],["isupHqpxs@|ElCl@Nh@CpNkI",["21"]],["aztpHcvxs@xAe@xSmP",["21"]],["isupHqpxs@fEfCt@hDbAvCtIdU",["12","19"]],["q~tpHalws@dE~KbEzO",["12","19"]],["grtpHenvs@fEpP",["12","19"]],["_ltpHs|us@pA`El@x@`GdF|@tAr@vB\\nCFzBJb\\",["12","19"]],["eqspH}ers@KsFa@aDwCkJcAyE[mHMkR",["12","19"]],["eqspH}ers@Qx_@s@`Jk@~D",["12"]],["wtspHatps@]zBKzDrAd[@`E",["12"]],["ksspHahos@cAlVMfAi@bBk@~@cAv@m@PsFd@qBrAwAjCgBdI",["12"]],["kmtpHqtms@eG~X{@~JGvC",["12"]],["uwtpHyils@RrVl@tL",["12"]],["aztpHcvxs@xAe@pTaQRAbBhA",["21"]],["}}spHcgys@p@\\f@FtCS~LxC",["21"]],["gp{pHwygt@kCqGeBkGmBiDmVwu@",["11"]],["ur|pHwfjt@kI}W",["11","12"]],["a}|pHu_kt@qRys@",["11"]],["sp}pHotlt@gDsOoEkQ",["11"]],["k|}pHowmt@m@eCuMeb@sBgF",["11"]],["{s}pHcnot@eErAkTp@[NK^PhA",["11"]],["{s}pHcnot@fDoA|EcCpFeE",["11"]],["c`}pH}zot@`QuQ",["11"]],["orxpHqyus@|Cns@",["11","21"]],["qmxpHaets@lBja@",["11","21"]],["smxpHi|fs@jG_GbByBjHkQPcA@qAaAqI",["11"]],["smxpHg|fs@m@l@Wr@{CjQ{AlDQ~PXzA",["11"]],["gtypHei{s@jAwA|Ay@J{@OaA",["11","14"]],["exxpHskws@p@pEbCnj@",["11","21"]],["iwzpHm_at@ZhGdB`HFvE",["11","14"]],["qqzpHix_t@m@_N",["11","14"]],["ohzpHyv~s@yC{NoBeFWmI",["11","12","14"]],["ohzpHyv~s@`@dFr@vEDfE|@xC",["11","12","14"]],["utzpHknbt@@{BQ{DHwA\\y@`EcE^mB",["11"]],["akzpH}`dt@UdRc@nF",["11"]],["akzpH}`dt@FyGKyDwBaK",["11"]],["}nzpHs{dt@yJia@",["11"]],["yzzpH_~et@mPar@_CuG",["11"]],["kqzpHcx_t@]mH",["11","14"]],["ewzpH}_at@\\tGbAhDb@nCTzJ",["11","14"]],["ewzpH}_at@WiE@uCd@kJ",["11","14"]],["utzpHknbt@_A`W",["11"]],["k|ypHsc}s@bBdHzBbN",["11","12","14"]],["k|ypHsc}s@a@kB[qGa@eDa@gBiBkE",["11","12","14"]],["ygzpHet~s@L~Bl@jDLzFv@pC",["11","12","14"]],["ygzpHet~s@uCyO_CmGQ{AIyF",["11","12","14"]],["e_{pHgz_t@lK[^VJfA",["12"]],["wsypHmi{s@fAoA~@]Za@Fu@c@oC",["11","14"]],["kuypHik|s@zDdV",["11","12","14"]],["ufxpHuoit@QmB{@iCUeBd@_Qc@iBcBmBWm@qAyI",["15","16"]],["{fxpHchht@LcFBkM?oMKqB",["15","16"]],["wfxpH}}ft@l@qAFo@oA_STcQ",["15","16"]],["wcxpHm|et@o@mJu@kEy@mJ~@gC",["15","16"]],["s`xpHgdet@cBeW",["15","16"]],["s`xpHgdet@~@rZBzNh@bL_@xE_@nAgBnD",["15","16"]],["ipxpHucbt@zLcX",["15","16"]],["ipxpHucbt@eAvB{FhJ",["15","16"]],["mxxpHiz`t@w@}Ek@eMBgB`@}@",["15","16"]],["itxpHge`t@]iCFqDmBeJ",["15","16"]],["yaypH_j{s@rHJtCgAvMcPpByCVs@OoA",["16","19"]],["gtypHei{s@jAwAvAg@tDZlCv@dBP",["16","17","21"]],["mhzpHq{ys@|FoQnAeC",["16","17"]],["mhzpHq{ys@yG|R",["16","17"]],["{{zpH_oxs@rIsW",["16","17"]],["wc{pHc}ws@zF{P",["16","17"]],["yyvpHyz}s@vIhR",["18"]],["aovpHog}s@pGxNBr@Qf@SJ}O`A}BMaET",["18"]],["m~wpH}d|s@nGmHhAu@nC[rKe@",["18"]],["kpxpHep}s@xNti@\\^d@M",["15","18","19"]],["cxxpHmd~s@vFfS",["15","16","18","19"]],["wtxpHsg`t@Iw@F{Dg@}BS_@_@MsA`@",["18"]],["okypH}v`t@zMtBhAI",["18"]],["_gzpHwx`t@vF\\d@Or@u@^M|NnB",["18"]],["_gzpHwx`t@yLaAi@XKnAfBlHFvE",["18"]],["e_{pHgz_t@fHMdBQTg@@i@_@oH",["18"]],["uh_qH_sws@uAByASsMeFi@D[v@",["16"]],["cx}pHgwws@mNl@eBZ{Gd@}HEcJ\\",["16"]],["yb}pHszws@gTjB",["16"]],["ie|pHmqxs@aIoCg@FoHrOw@bC{A|CQNmBZ",["16"]],["ie|pHmqxs@|@`@Vl@jEpd@",["16"]],["g|{pHkiws@Xr@XHZIhGeIbKaGfAeC",["16"]],["ac{pHe~ws@lF}O",["16","17"]],["s{zpHcoxs@jJgY",["16","17"]],["ggzpHu}ys@_HhS",["16","17"]],["egzpHy}ys@|EkOx@sArAaE",["16","17"]],["wsypHmi{s@oApBc@pCmClI",["11","14","16","17","21"]],["wsypHmi{s@fAoAtA_@nD\\zD`AzCJ",["16","17","21"]],["q~xpHqi{s@|CFbAGtCqAlM_PnBwC",["16"]],["kpxpHep}s@~Nfj@Dn@Sn@",["16"]],["a}wpHifus@oIrQ",["14"]],["oexpHg~us@nGtT@bA",["14"]],["wkxpHanvs@fExN",["14"]],["oxxpHemws@p@jDpAxBrG|T",["14"]],["oxxpHemws@m@uC{Ky_@",["11","14","21"]],["{oypHsiys@`H|U",["11","14","21"]],["s~|pHu{dt@qCkFyBeFmA_@Oi@",["14"]],["om|pHgcdt@eCoFmHmJoBoD",["14"]],["om|pHgcdt@|FjOpApH",["14"]],["iw{pHqqbt@wCcEmAmAi@kAs@oCq@iG",["14"]],["iwzpHm_at@YoFRqI",["11","14"]],["qkrpHc_~s@hn@o`B|@gAfB_AfFa@tCE",["17"]],["qkrpHc_~s@_IxSsAvCcArAeK|JaArAoCfFcAjAeAt@}Ad@wADgIo@wFy@_EcBkAYaJi@kBA",["17"]],["{_upHip|s@uDLoAE}OsC_EG",["17"]],["__vpH}t|s@uFJyPdA}BMaET",["17"]],["u|wpHkf|s@vE_GhAu@nC[rKe@",["17"]],["yaypH_j{s@rHJtCgAvMcPrAyBlDqD",["12","17","21"]],["wc{pHc}ws@{HdU",["17"]],["sm{pH}fws@Y|Al@fEUzK",["17"]],["_p{pHivts@`AaTCy[JuG",["17"]],["_p{pHivts@I~BTbAV^dIrGjJjBd@~@EdC",["17"]],["ixzpH_}ss@q@xUQfRZ~E",["17"]],["exzpHw|ss@w@h^CbH\\fG",["17"]],["uo{pHaxts@KtDHl@\\p@hH`GjKzBf@hAIjC",["17"]],["uo{pHaxts@|@gREy[RgK",["17"]],["mk{pHkkws@oArDI|@l@|DOnH",["17"]],["ac{pHe~ws@kGxQ",["17"]],["a_vpHut|s@oCNmBAmPbA_CKiDT",["17"]],["q~tpH_p|s@_FLqAE{OsCaEI",["17"]],["qkrpHc_~s@_IxSsAvCcArAeK|JaArAoCfFcAjAeAt@}Ad@wADgIo@wFy@_EcBkAYcLa@",["17"]],["_|bqH{}at@rBo@pPkD",["18"]],["ufbqHwdbt@vH_B~@_@jNeNp@c@xA]",["18"]],["egaqH_zbt@nE{@x@?|@d@vAxB`Ab@x@KtBqAn@?b@h@hDpI",["18"]],["az_qHc{at@wCcA}AKq@a@kFcM",["18"]],["_z_qHa{at@lMlEjJvD",["18"]],["e`_qH{nat@fJfDlCp@",["18"]],["k}}pHs_at@cRmG",["18"]],["_i}pHus`t@}Js@c@Mw@aAgB{DiA}@",["18"]],["_x|pHgr`t@sHKkFa@",["12","18"]],["qx{pHsa`t@mAqA{CsBaE{AmFeA}BgBeBs@oBO",["12","18"]],["qx{pHsa`t@|HhHzPw@",["12","18"]],["w|zpHaz_t@`GMdAQTq@O}C",["18"]],["ofzpHkx`t@iMeAc@TIrAbAhDb@nCTzJ",["18"]],["ofzpHkx`t@hFX`@MrAeAlOrB",["18"]],["akypHqv`t@bMtBj@?bAY",["18"]],["owtpHijls@TjXn@hK",["12"]],["omtpHesms@iCfMsBlIq@dIO~D",["12"]],["esspHkkos@IbGs@fPk@vD_AfBgAx@eAVaEVaA^eAz@s@dAm@~AeBlI",["12"]],["{sspH_wps@u@~EIrDtA~]",["12"]],["aqspHucrs@Op]iAbM",["12"]],["aqspHucrs@CqG]gD}@yD{BwGw@eF]aW",["12"]],["ultpHg_vs@`AxDz@jBnH|G|@bBj@tB\\nFJn^",["12"]],["yuwpHgo{s@r@vEEfHdFxO",["12","15","19","21"]],["u|wpHkf|s@j@i@`@BfGzHHXE~AaCnFBbB",["12","21"]],["yaypH_j{s@eBQmCw@qBU]a@q@aE",["12"]],["wz|pH_vdt@iAqBCm@hDmQ",["12"]],["ih}pHmyct@nBiIx@sBvCcOZ[ZBv@fA",["12"]],["op}pHgcct@d@oH~EuK",["12"]],["sx}pHmgbt@G_ANaA~DyGxAkD?g@k@iBL_D",["12"]],["sx}pHmgbt@bDt[",["12"]],["_i}pHus`t@wDW]UyBsT",["12"]],["c~wpHyeis@zCr^",["11","21"]],["adxpHmojs@|Drh@",["11","21"]],["{dxpHm|ls@Lp^b@fL_@fNFzO",["11","21"]],["eexpHu`ns@Hfc@",["11","21"]],["qexpHukos@J~i@",["11","21"]],["sgxpH_hrs@l@hJb@~VO~w@",["11","21"]],["erxpHuwus@fCxk@",["11","21"]],["oxxpHemws@~@tFhCxl@",["11","21"]],["{oypHsiys@uMsc@@kAtAgE",["11","14","21"]],["ma}pHazot@jCaCvOuP|AsA",["11"]],["_u}pH}mot@dJuDjGmE",["11"]],["cu}pH{mot@kDdAiTp@[`@Ef@t@bC",["11"]],["i_~pH{~mt@mK}\\mB{E",["11"]],["_p}pH_rlt@kD_P}H{Z",["11"]],["k||pHm}jt@sRqs@",["11","12"]],["in|pHw{it@aMu`@",["11","12"]],["_p{pHwxgt@gCiGkByGgC_FmQwi@",["11"]],["u{zpHc`ft@qOmo@wBcG",["11"]],["mpzpHm_et@gJu_@",["11"]],["kkzpHe}ct@LgIIoFeDoO",["11"]],["kkzpHe}ct@QrNe@xF",["11"]],["ytzpHsnbt@@uBSuDH_B`@_A`EcEXsA",["11"]],["ytzpHsnbt@[hLy@xN",["11"]],["iwxpHoles@d@nAf@ZnDkC",["11"]],["kmxpHg|fs@gA`BiChOEbAJrB`EdQ@b@M`@i@d@",["11"]],["kmxpHg|fs@rIqIpAiC`FcMZeAHwBi@_F",["11"]],["{ixpHoass@fAnX",["11","21"]],["}mxpH{jts@`Cjh@",["11","21"]],["crtpHcnvs@lDzM",["12"]],["m_upHinws@fF`N`EbP",["12"]],["gsupHwpxs@xDrBPTjA|E`JdV",["12"]],["o{upHmvxs@dBvA`D|A",["12","19","21"]],["qtvpHk`ys@vBS~@@tIzBbA`@nEnD",["12","15","19","21"]],["qtvpHk`ys@mHr@s@Uc@i@[sA}CeYmAgFeCsH",["12","15","19","21"]],["w|zpHaz_t@zHW\\XJt@",["12"]],["ioupHuyvs@t@z`@",["15"]],["equpH}vws@z@f\\",["15"]],["o{upHmvxs@fBlBrAfD~@bDlAtP",["15"]],["m~wpH}d|s@nA}Ab@I~G|I@`BeCxFBbB",["15","19"]],["}|upHmwxs@`CxB`B|D|@zC",["15"]],["{supHyhxs@bA`N",["15"]],["wqupHwyws@|@hZ",["15"]],["youpHm~vs@v@~`@Kl@q@X",["15"]],["}|tpHwtxs@dEeBjQoNRq@",["21"]],["gsupHwpxs@|EjCtAJtKuG",["21"]],["m_tpHehys@fB`An@D|AUh@@~LxC",["21"]],["}|tpHwtxs@zD}A|SsP`@Cr@f@",["21"]],["_hvpHylwt@~\\{WpDuDhBkDb@yAp@aEdJoeA",["S1"]],["gstpHc`{t@xFwo@vBsLzAoFn[u`A|DgJnBoDrFqI",["S1"]],["srxpHqbis@dMqf@pYcdAbCoMpB{Qt@{RKe~Dm@wJkAwG}V}{@eTes@s]ynA",["S1","S2"]],["mzqpH__us@zEdV|BhIt@hBrBpDrAbBhCbCpM~H~PpIdEvCzEnEjDfCdxB|rA",["S7"]],["qqgqHc{ht@gAwB{AsBgBaBsAw@c[oKuNuHoCaA",["S6"]],["}~fqHotat@}A}BiBoDmBcFqAwEqBqLs@gKIeGHqHnGqwBFiH_@mHy@mF}AwFeCgH",["S6"]],["_}hqHeuks@vjAuL",["S5"]],["enfqHkz`s@fOuWlEgGxBwBdEaDtq@ib@lb@}b@",["S4"]],["gzcqHi}as@`BxGnAvCbBlC~AjBhTtR",["S3"]],["gzcqHi}as@u@sHEmJPgDd@_EpB{HdAaCxAcC~AoBhMmM|HeH",["S3"]],["cw|pH}oet@~@iJ`@yg@JkDj@kDp@sBnAkBzBgBzBcAbHmFdCqDPu@MuAuAqC}Ust@",["12"]],["m}wpH{eus@cIdQ",["14"]],["od{pHobbt@CdCIZULsAU_DqB[q@AqCk@yAgB{BmBiAa@e@",["14"]],["od{pHobbt@RsAdHgD\\A|BnALd@IlDy@xN",["14"]],["un}pHcqlt@Tc@lF_F",["12"]],["{w|pHmmet@j@oDd@iGd@oi@VkD`@uBp@sBnAkBzBgBzBcAbHmFdCqDPu@MuAeAmB{Qyj@",["12"]],["{|qqH_ult@qvAbJkHPuEY_F}@_VkH",["S6"]],["ec|pH_`au@fAti@hDpnA",["S8","S9"]],["ipkqHsols@cI_WwIcVwCwGaDmEkWyVyIyH_w@ga@eAw@}AqBgA{BcAmDk@eEMcDj@w\\|@oO",["S5"]],["gzcqHi}as@u@sHEmJPgDd@_EpB{HdAaCxAcC~AoBlVeW",["S3"]],["_xipHcmtt@cr@mV{FgB_bAa^kCs@oBW}BE{kAlD",["S2"]],["}gvpHop|r@`r@veE",["S2"]],["}gvpHop|r@cO}}@yAoGcBaEoFgJkAiCmHaR{GqS",["S2"]],["orgqHy|ht@eCuDgBaBsAw@uMsEgCm@gHaCkIiEiIsC",["S6"]],["mmiqHk~it@mUgIyJaCsd@mPyEyCqLuKwYuU",["S6"]],["wsnqHgtcs@n@~LS|GaAtM",["U3"]],["ctnqHsvds@QbEBbSXbG",["U3"]],["ctnqHsvds@|@sMv@aFZeQXiE",["U3"]],["{ixpHoass@fAnX",["11"]],["}mxpH{jts@`Cjh@",["11"]],["_iypH}snt@jDaWrCeLfJyb@l@uDV_FImEs@kM}@sV",["S1","S2"]],["muxpHcvrt@i@}S@gKZmP^}GlAyJbBmHtAaEpDgH`B{BnCqClv@cm@",["S1","S2"]],["_}hqHeuks@ci@nFoDDwFo@yBs@yC}AsBuAiCmCcDcGsDmL",["S5"]],["_}hqHeuks@vjAuL",["S5"]],["qqgqHc{ht@gAwB{AsBgBaBsAw@c[oKuNuHoCaA",["S6"]],["kv_qHwq~r@nBdCx@`Bt@tBx@fE\\|E?lD_@hFm@~CaB`FkDhG_XzW",["S3"]],["ctnqHsvds@QbEBbSXbG",["U3"]],["ctnqHsvds@QbEBbSXbG",["U3"]],["yaypH_j{s@eBQgBe@WLIx@jAbE",["19"]],["kwxpHkzys@q@iAmKs^Om@KuBU{@",["19"]],["qnxpHgeys@yGcT",["19"]],["qglpHkpdu@prAwR",["S1"]],["oi|pH_bou@{EjL}Kd[gBtJ]pEKpEDpGZzIj@fH~@~FnBrG`HlQxB|E",["S8","S9"]],["am|pH}xju@dClGxAdG|@`HZ|GG`Ii@bHuH`d@q@dIM~FnAjo@NdO^lJvAfSTpGNvPvCvmA",["S8","S9"]],["q{npHc}du@uF?cDb@yAl@_BdAoC`Dka@to@qFnJol@t_AcLlR",["S1"]],["q{npHc}du@vMBjDV~l@xK`ET~BAxFq@",["S1"]],["am|pH}xju@dClGxAdG|@`HZ|GAvFg@~H}Hne@q@dIMtInAtl@NdO^lJvAfSTpGl@xa@lCf_A",["S8","S9"]],["obvqHmult@w|Bmr@aH_C_HgDyEgDkFyF}HwK",["S6"]],["mj{qH}kot@ilA_bBmDgEsCqCyFoEsCeBgDeBwD{AgFwAuF_AyE[mEC",["S6"]],["srerHcdnt@hS}KnGoFfB{BjB{ChByD`HmQlEuGbwAkxAzHqFjDiBpDwAbEmAxFeAxEa@fDI",["S6"]],["yzsqHitws@oIzHkCnAiCf@eCDgC[aBg@iImDoDm@wFLiLfB",["S5"]],["srerHcdnt@hS}KnGoFfB{BjB{ChByD`HmQlEuGbwAkxAzHqFjDiBpDwAbEmAxFeAdJk@",["S6"]],["_i{qHajot@wmA{cBmDgEsCqCyFoEsCeBgDeBwD{AgFwAuF_AyE[iFC",["S6"]],["wavqHcult@o}Bwr@aH_C_HgDyEgDkFyFoG{I",["S6"]],["mj{qH}kot@ilA_bBmDgEsCqCyFoEsCeBgDeBwD{AgFwAuF_AyE[mEC",["S6"]],["srerHcdnt@hS}KnGoFfB{BjB{ChByD`HmQlEuGbwAkxAzHqFjDiBpDwAbEmAxFeAxEa@fDI",["S6"]],["obvqHmult@w|Bmr@aH_C_HgDyEgDkFyF}HwK",["S6"]]],"stations":[["Hauptwache",50.11397,8.67874,"SU",14],["Konstablerwache",50.11462,8.68699,"SUT",12],["Hauptbahnhof tief",50.10708,8.66216,"S",8],["Taunusanlage",50.1136,8.66883,"S",8],["Ostendstraße",50.11246,8.69705,"ST",8],["Südbahnhof",50.09924,8.68605,"SUT",8],["Mühlberg",50.1019,8.69971,"ST",6],["Willy-Brandt-Platz",50.10923,8.67495,"UT",6],["Wiesbaden Hauptbahnhof",50.06964,8.24444,"S",4],["Galluswarte",50.10482,8.64411,"ST",4],["Lokalbahnhof",50.10205,8.69292,"ST",4],["Hauptbahnhof",50.10786,8.66308,"SUT",5],["Messe",50.11174,8.64352,"S",4],["Westbahnhof",50.1193,8.63955,"S",4],["Offenbach (Main)-Westend Ledermuseum",50.10603,8.75117,"S",4],["Offenbach (Main)-Zentrum Marktplatz",50.10585,8.76363,"S",4],["Offenbach (Main)-Offenbach Ost Ostbahnhof",50.10275,8.7845,"S",4],["Offenbach (Main)-Kaiserlei Kaiserlei",50.10521,8.73849,"S",4],["Schweizer Platz",50.10235,8.68013,"U",4],["Heddernheim",50.16132,8.64995,"U",4],["Weißer Stein",50.15664,8.65634,"U",4],["Lindenbaum",50.15237,8.66178,"U",4],["Hügelstraße",50.14792,8.66627,"U",4],["Fritz-Tarnow-Straße",50.14274,8.66877,"U",4],["Dornbusch",50.13694,8.67119,"U",4],["Miquel-/Adickesallee",50.13159,8.67221,"U",4],["Holzhausenstraße",50.12664,8.67379,"U",4],["Eschenheimer Tor",50.11748,8.67927,"U",4],["Grüneburgweg",50.12184,8.67569,"U",4],["Mainz, Hauptbahnhof",50.00112,8.25872,"ST",3],["Wiesbaden-Biebrich Bahnhof Wiesbaden Ost",50.04173,8.25645,"S",3],["Niederrad Bahnhof",50.08097,8.6369,"ST",3],["Stadion",50.06832,8.63314,"S",3],["Rödelheim Bahnhof",50.12437,8.60711,"S",3],["Zeilweg",50.16433,8.64313,"U",3],["Bockenheimer Warte",50.11981,8.65321,"UT",3],["Ginnheim Mitte",50.14023,8.64669,"UT",3],["Wiesenau",50.16664,8.63023,"U",3],["Niederursel",50.16921,8.62276,"U",3],["Rüsselsheim Opelwerk Bahnhof",49.988,8.40037,"S",2],["Mainz-Bischofsheim Bahnhof",49.99333,8.35815,"S",2],["Wiesbaden-Mainz-Kastel Bahnhof",50.00711,8.28232,"S",2],["Raunheim Bahnhof",50.00971,8.45458,"S",2],["Rüsselsheim Bahnhof",49.99167,8.41371,"S",2],["Laubenheim, Bahnhof",49.96117,8.31418,"S",2],["Mainz, Römisches Theater",49.99347,8.27806,"S",2],["Bodenheim, Bahnhof",49.92999,8.31186,"S",2],["Nackenheim, Bahnhof",49.91916,8.3416,"S",2],["Nierstein, Bahnhof",49.87187,8.34295,"S",2],["Guntersblum, Bahnhof",49.79155,8.35108,"S",2],["Dienheim, Bahnhof",49.84087,8.35705,"S",2],["Oppenheim, Bahnhof",49.85757,8.35797,"S",2],["Kelsterbach Bahnhof",50.0623,8.52952,"S",2],["Höchst Bahnhof",50.10246,8.54238,"S",2],["Nied Bahnhof",50.10233,8.57143,"S",2],["Griesheim Bahnhof",50.09433,8.60639,"S",2],["Flughafen Regionalbahnhof",50.05122,8.57125,"S",2],["Gateway Gardens",50.05658,8.59449,"S",2],["Farbwerke",50.09845,8.52832,"S",2],["Offenbach (Main)-Bieber Bieber Bahnhof",50.0904,8.80857,"S",2],["Oberursel (Taunus) Bahnhof",50.19909,8.58793,"SU",2],["Eschborn-Niederhöchstadt Bahnhof",50.1542,8.54724,"S",2],["Eschborn Bahnhof",50.14359,8.56094,"S",2],["Eschborn Südbahnhof",50.13359,8.57843,"S",2],["Mühlheim (Main)-Dietesheim S-Bahn",50.12042,8.85818,"S",2],["Mühlheim (Main) Bahnhof",50.11932,8.83818,"S",2],["Schäfflestraße",50.13127,8.73409,"U",2],["Gwinnerstraße",50.13351,8.74104,"U",2],["Kruppstraße",50.13777,8.74432,"U",2],["Hessen-Center",50.14049,8.74908,"U",2],["Enkheim",50.14255,8.75361,"U",2],["Zoo",50.1155,8.69831,"UT",2],["Alte Oper",50.11538,8.6709,"U",2],["Westend",50.11821,8.66258,"U",2],["Leipziger Straße",50.12259,8.6457,"U",2],["Kirchplatz",50.12518,8.63747,"U",2],["Industriehof",50.12869,8.62973,"U",2],["Kalbach",50.18305,8.65801,"U",2],["Bonames Mitte",50.18529,8.66467,"U",2],["Nieder-Eschbach",50.19911,8.67046,"U",2],["Ginnheim/Niddapark",50.14381,8.64214,"U",2],["Römerstadt",50.1534,8.63812,"U",2],["Nordwestzentrum",50.15835,8.63446,"U",2],["Heddernheimer Landstraße",50.16382,8.63479,"U",2],["Dom/Römer",50.11077,8.6839,"U",2],["Eissporthalle/Festplatz",50.12392,8.71745,"UT",2],["Uni Campus Riedberg",50.1755,8.62838,"U",2],["Riedberg",50.17945,8.635,"U",2],["Hanau Hauptbahnhof",50.12131,8.92969,"S",2],["Hanau-Steinheim (Main) Bahnhof",50.12162,8.90826,"S",2],["Mainz, Nordbahnhof\\W. & Mertz",50.01939,8.24539,"S",1],["Flörsheim (Main) Bahnhof",50.01697,8.43078,"S",1],["Hochheim (Main) Bahnhof",50.00433,8.3498,"S",1],["Ginsheim-Gustavsburg Mainz-Gustavsburg Bf",49.99429,8.31446,"S",1],["Dreieich-Buchschlag Bahnhof",50.02281,8.66104,"S",1],["Langen (Hessen) Flugsicherung",50.00553,8.65854,"S",1],["Rodgau-Nieder-Roden Bahnhof",49.99706,8.87109,"S",1],["Rodgau-Nieder-Roden Rollwald Bahnhof",49.98848,8.84662,"S",1],["Rödermark-Ober-Roden Bahnhof",49.97389,8.82952,"S",1],["Riedstadt-Wolfskehlen Bahnhof",49.8546,8.4931,"S",1],["Riedstadt-Goddelau Bahnhof",49.83306,8.48911,"S",1],["Neu-Isenburg-Zeppelinheim Bahnhof",50.03627,8.60502,"S",1],["Mörfelden-Walldorf-Walldorf Bahnhof",50.00166,8.58033,"S",1],["Groß-Gerau Dornheim Bahnhof",49.87761,8.49369,"S",1],["Groß-Gerau Dornberg Bahnhof",49.91194,8.49479,"S",1],["Mörfelden-Walldorf-Mörfelden Bahnhof",49.97948,8.56576,"S",1],["Langen (Hessen) Bahnhof",49.99367,8.65671,"S",1],["Darmstadt Hauptbahnhof",49.8725,8.62964,"ST",4],["Darmstadt-Arheilgen Bahnhof",49.91386,8.6456,"S",1],["Darmstadt-Wixhausen Bahnhof",49.93088,8.64803,"S",1],["Egelsbach Bahnhof",49.96893,8.6536,"S",1],["Erzhausen Bahnhof",49.95106,8.65098,"S",1],["Dietzenbach Mitte Bahnhof",50.01743,8.7891,"S",1],["Dietzenbach Bahnhof",50.00811,8.78552,"S",1],["Rodgau-Dudenhofen Bahnhof",50.01035,8.88461,"S",1],["Rodgau-Jügesheim Bahnhof",50.02577,8.87896,"S",1],["Kriftel Bahnhof",50.08224,8.47531,"S",1],["Hofheim am Taunus Bahnhof",50.08483,8.44571,"S",1],["Hattersheim (Main)-Eddersheim Bahnhof",50.03948,8.45674,"S",1],["Niedernhausen Bahnhof",50.15964,8.3132,"S",1],["Eppstein-Niederjosbach Bahnhof",50.15055,8.35006,"S",1],["Eppstein-Bremthal Bahnhof",50.14096,8.3646,"S",1],["Eppstein Bahnhof",50.13964,8.38795,"S",1],["Hofheim am Taunus-Lorsbach Bahnhof",50.11578,8.42305,"S",1],["Stresemannallee Bahnhof",50.09451,8.67123,"ST",2],["Louisa Bahnhof",50.08396,8.67037,"ST",1],["Neu-Isenburg Bahnhof",50.05286,8.66542,"S",1],["Bad Homburg v.d.H. Bahnhof",50.21997,8.62126,"S",1],["Friedrichsdorf-Seulberg Bahnhof",50.24191,8.64601,"S",1],["Zeilsheim Bahnhof",50.09047,8.50723,"S",1],["Ginnheim Bahnhof",50.143,8.64314,"S",1],["Eschersheim Bahnhof",50.15751,8.65467,"S",1],["Berkersheim Bahnhof",50.17601,8.69718,"S",1],["Bad Vilbel Südbahnhof",50.17852,8.73521,"S",1],["Bad Vilbel Bahnhof",50.18859,8.73956,"S",1],["Bad Vilbel-Dortelweil Bahnhof",50.20756,8.75119,"S",1],["Karben-Groß-Karben Bahnhof",50.23139,8.75357,"S",1],["Schwalbach (Taunus) Limes Bahnhof",50.15459,8.52822,"S",1],["Sulzbach (Taunus) Nordbahnhof",50.13877,8.51758,"S",1],["Bad Soden (Taunus) Bahnhof",50.14296,8.50443,"S",1],["Hattersheim (Main) Bahnhof",50.06724,8.48892,"S",1],["Heusenstamm Bahnhof",50.06086,8.80145,"S",1],["Dietzenbach Steinberg Bahnhof",50.02642,8.79323,"S",1],["Karben-Okarben Bahnhof",50.25317,8.75386,"S",1],["Oberursel (Taunus)-Weißkirchen/Steinbach Bahnhof",50.17385,8.58712,"S",1],["Oberursel (Taunus)-Stierstadt Bahnhof",50.18569,8.58469,"S",1],["Frankfurter Berg Bahnhof",50.17016,8.67659,"S",1],["Kronberg (Taunus) Bahnhof",50.17986,8.517,"S",1],["Kronberg (Taunus) Süd",50.17331,8.52918,"S",1],["Sindlingen Bahnhof",50.08744,8.51218,"S",1],["Hausener Weg",50.13143,8.61984,"U",1],["Stephan-Heise-Straße",50.13632,8.61497,"U",1],["Friedhof Westhausen",50.13886,8.61266,"U",1],["Heerstraße",50.14365,8.60815,"U",1],["Oberursel (Taunus) Stadtmitte",50.20262,8.5855,"U",1],["Oberursel (Taunus) Altstadt",50.20603,8.57872,"U",1],["Oberursel (Taunus) Lahnstraße",50.20998,8.57104,"U",1],["Oberursel (Taunus) Glöcknerwiese",50.21348,8.56172,"U",1],["Oberursel (Taunus) Kupferhammer",50.21439,8.55646,"U",1],["Oberursel (Taunus) Rosengärtchen",50.21518,8.54904,"U",1],["Oberursel (Taunus) Waldlust",50.21518,8.54355,"U",1],["Ostbahnhof",50.11279,8.7065,"U",1],["Große Nelkenstraße",50.13302,8.62835,"U",1],["Hausen",50.13825,8.62456,"U",1],["Sandelmühle",50.16577,8.64525,"U",1],["Riedwiese/Mertonviertel",50.17095,8.64315,"U",1],["Bad Homburg v.d.H.-Ober-Eschbach (U)",50.21532,8.65085,"U",1],["Musterschule",50.12188,8.68622,"U",1],["Glauburgstraße",50.12739,8.68522,"U",1],["Deutsche Nationalbibliothek",50.13097,8.68392,"U",1],["Hauptfriedhof",50.13632,8.68432,"U",1],["Marbachweg/Sozialzentrum",50.14225,8.68463,"U",1],["Feuerwehrstraße",50.14409,8.69149,"U",1],["Theobald-Ziegler-Straße",50.14773,8.69003,"U",1],["Ronneburgstraße",50.1513,8.68818,"U",1],["Sigmund-Freud-Straße",50.15461,8.68624,"U",1],["Preungesheim",50.15848,8.68749,"U",1],["Festhalle/Messe",50.11254,8.65427,"UT",2],["Merianplatz",50.12003,8.69526,"U",1],["Höhenstraße",50.12304,8.70149,"U",1],["Seckbacher Landstraße",50.13353,8.71164,"U",1],["Bornheim Mitte",50.12632,8.70768,"UT",1],["Fischstein",50.12931,8.62509,"U",1],["Habsburgerallee",50.1173,8.70836,"U",1],["Parlamentsplatz",50.12001,8.7134,"U",1],["Johanna-Tesch-Platz",50.12774,8.72586,"U",1],["Oberursel (Taunus)-Weißkirchen Ost",50.18565,8.6026,"U",1],["Oberursel (Taunus)-Bommersheim",50.19323,8.59391,"U",1],["Oberursel (Taunus)-Hohemark",50.21535,8.53754,"U",1],["Offenbach (Main)-Bieber Bieber Waldhof",50.08202,8.82709,"S",1],["Obertshausen Bahnhof",50.0724,8.85319,"S",1],["Schwalbach (Taunus) Nord",50.15986,8.53478,"S",1],["Rodgau-Hainhausen Bahnhof",50.03914,8.87582,"S",1],["Rodgau-Weiskirchen Bahnhof",50.05257,8.87785,"S",1],["Wöllstadt-Nieder-Wöllstadt Bahnhof",50.28013,8.76771,"S",1],["Friedberg (Hessen)-Bruchenbrücken Bahnhof",50.30248,8.78936,"S",1],["Friedberg (Hessen) Bahnhof",50.33274,8.76118,"S",1],["Friedrichsdorf Bahnhof",50.25261,8.64456,"S",1],["Friedensbrücke",50.0987,8.66935,"T",6],["Darmstadt Willy-Brandt-Platz",49.87643,8.65038,"T",5],["Darmstadt Pallaswiesenstraße",49.88068,8.6508,"T",5],["Darmstadt Rhönring",49.88463,8.65167,"T",5],["Darmstadt Schulstraße",49.87041,8.65666,"T",5],["Darmstadt Schloss",49.87267,8.65465,"T",5],["Platz der Republik",50.10932,8.66105,"T",5],["Baseler Platz",50.10477,8.66487,"T",5],["Darmstadt Marienhöhe",49.84325,8.64606,"T",4],["Darmstadt Bessunger Straße",49.85751,8.64682,"T",4],["Darmstadt Rhein-/Neckarstraße",49.87153,8.64471,"T",4],["Darmstadt Berliner Allee",49.87068,8.63579,"T",4],["Darmstadt Landskronstraße",49.85308,8.64678,"T",4],["Otto-Hahn-Platz",50.10176,8.67529,"T",4],["Schwanthalerstraße",50.10087,8.6816,"T",4],["Schweizer-/Gartenstraße",50.10317,8.67984,"T",4],["Vogelweidstraße",50.09756,8.66484,"T",4],["Universitätsklinikum",50.09611,8.65965,"T",4],["H.-Hoffmann-Str./Blutspendedienst",50.09188,8.65307,"T",4],["Niederräder Landstraße",50.08866,8.65151,"T",4],["Mainz, Hbf West/Taubertsbergb.",49.99955,8.25852,"T",3],["Mainz, Lessingstraße",50.00615,8.25528,"T",3],["Mainz, Goethestraße",50.0095,8.25139,"T",3],["Mainz, Bismarckplatz",50.01223,8.24888,"T",3],["Darmstadt Nordbahnhof",49.89118,8.6532,"T",3],["Darmstadt Merck",49.89541,8.65422,"T",3],["Darmstadt Maulbeerallee",49.89824,8.65482,"T",3],["Darmstadt-Arheilgen Im Fiedlersee",49.9017,8.65554,"T",3],["Darmstadt-Arheilgen Fuchsstraße",49.90588,8.65636,"T",3],["Darmstadt-Arheilgen Löwenplatz",49.9105,8.65743,"T",3],["Darmstadt-Arheilgen Messeler Straße",49.91335,8.65524,"T",3],["Darmstadt-Eberstadt Friedhof",49.81099,8.64603,"T",3],["Darmstadt-Eberstadt Frankenstein",49.80764,8.64564,"T",3],["Darmstadt Lincoln-Siedlung",49.84812,8.64629,"T",3],["Darmstadt-Eberstadt Wartehalle",49.82053,8.64414,"T",3],["Darmstadt-Eberstadt Modaubrücke",49.81706,8.64411,"T",3],["Darmstadt Luisenplatz",49.87299,8.65123,"T",3],["Darmstadt-Arheilgen Kolpingweg",49.91759,8.65464,"T",3],["Darmstadt Prinz-Emil-Garten",49.86134,8.64721,"T",3],["Darmstadt Eschollbrücker Straße",49.86506,8.64704,"T",3],["Darmstadt-Eberstadt Carl-Ulrich-Straße",49.83305,8.64525,"T",3],["Darmstadt-Eberstadt Friedrich-Ebert-Straße",49.83841,8.64572,"T",3],["Darmstadt Roßdörfer Platz",49.86868,8.66272,"T",3],["Darmstadt Herdweg",49.86524,8.66539,"T",3],["Darmstadt Jahnstraße",49.8616,8.66737,"T",3],["Darmstadt Merck-Stadion",49.85776,8.6685,"T",3],["Lokalbahnhof/Textorstraße",50.10261,8.68963,"T",3],["Brücken-/Textorstraße",50.10182,8.687,"T",3],["Güterplatz",50.10756,8.65575,"T",3],["Speyerer Straße",50.10552,8.65111,"T",3],["Karmeliterkloster",50.11026,8.67813,"T",3],["Weser-/Münchener Straße",50.10808,8.67054,"T",3],["Hauptbahnhof/Münchener Straße",50.10694,8.666,"T",3],["Triftstraße",50.08709,8.65048,"T",3],["Börneplatz/Stoltzestraße",50.11266,8.68997,"T",3],["Börneplatz",50.11246,8.68756,"T",3],["Römer/Paulskirche",50.11098,8.68219,"T",3],["Mainz, Kisselberg",49.99211,8.22563,"T",2],["Bretzenheim, J.-H.-Str./Arena",49.98952,8.22397,"T",2],["Bretzenheim, Hochschule Mainz",49.98744,8.22868,"T",2],["Bretzenheim, H.-v.-Bingen Str.",49.98415,8.23416,"T",2],["Bretzenheim, Ludwig-Nauth-Str.",49.98017,8.2374,"T",2],["Bretzenheim(Mz),H.-Böckler-S.",49.97606,8.23931,"T",2],["Bretzenheim, Südring",49.97294,8.23836,"T",2],["Bretzenheim, Wilh.-Quetsch-Str",49.96998,8.23611,"T",2],["Marienborn, Im Borner Grund",49.96435,8.2301,"T",2],["Gonsenheim, Kapellenstr./G.Cen",50.00139,8.20412,"T",2],["Gonsenheim, Viermorgenweg",49.99834,8.19362,"T",2],["Finthen, Gemarkungsgrenze",49.99635,8.18804,"T",2],["Mainz, Universität",49.9963,8.24583,"T",2],["Mainz, Fr.-v.-Pfeiffer-Weg",49.99431,8.23618,"T",2],["Marienborn (Mz), Wiesenstr.",49.96275,8.22682,"T",2],["Mainz, Marienborn",49.96163,8.22272,"T",2],["Marienborn (Mainz), VRM",49.95985,8.21077,"T",2],["Lerchenberg, ZDF",49.96019,8.2028,"T",2],["Lerchenberg, Hindemithstr.",49.9584,8.19724,"T",2],["Mainz, Schillerplatz",49.99857,8.26694,"T",2],["Mainz, Am Gautor",49.99334,8.26659,"T",2],["Mainz, Schott AG",50.01542,8.24354,"T",2],["Mombach, Zwerchallee",50.0163,8.2389,"T",2],["Mombach, Turmstraße",50.01426,8.23411,"T",2],["Gonsenheim, Gonsbachgärten",50.00926,8.23483,"T",2],["Gonsenheim, Elbestraße",50.00553,8.22127,"T",2],["Gonsenheim, Josef-Ludwig-Platz",50.00354,8.21292,"T",2],["Gonsenheim, Nerotalstraße",50.00266,8.20969,"T",2],["Gonsenheim, Hugo-Eckener-Str.",50.00577,8.2262,"T",2],["Gonsenheim, An der Bruchspitze",50.00534,8.23092,"T",2],["Darmstadt Klinikum",49.87604,8.6476,"T",2],["Darmstadt-Eberstadt Kirche",49.81403,8.64616,"T",2],["Darmstadt-Eberstadt Von-Ketteler-Straße",49.8288,8.64483,"T",2],["Darmstadt-Eberstadt Katharinenstraße",49.82459,8.64456,"T",2],["Darmstadt-Arheilgen Dreieichweg",49.92062,8.65439,"T",2],["Darmstadt Waldfriedhof",49.86773,8.61429,"T",2],["Darmstadt Otto-Hesse-Straße",49.86639,8.60379,"T",2],["Griesheim Flughafenstraße",49.86433,8.58875,"T",2],["Griesheim Sankt Stephan",49.86312,8.57963,"T",2],["Griesheim Kantstraße",49.86233,8.57406,"T",2],["Griesheim Wagenhalle",49.86127,8.56643,"T",2],["Griesheim Hans-Karl-Platz/Am Markt",49.86039,8.56042,"T",2],["Griesheim Platz Bar-le-Duc",49.86024,8.55525,"T",2],["Darmstadt Böllenfalltor",49.85251,8.6703,"T",2],["Darmstadt Orangerie",49.85867,8.65196,"T",2],["Darmstadt Freiberger Platz",49.86085,8.65319,"T",2],["Darmstadt Goethestraße",49.86317,8.65415,"T",2],["Darmstadt Heinrichstraße",49.86629,8.65591,"T",2],["Darmstadt Lichtenbergschule",49.8503,8.65358,"T",2],["Darmstadt Ludwigshöhstraße",49.85317,8.65216,"T",2],["Darmstadt Knabenschule",49.85632,8.65147,"T",2],["Darmstadt Kasinostraße",49.87514,8.64382,"T",2],["Darmstadt Kirschenallee",49.87491,8.63501,"T",2],["Darmstadt-Kranichstein Bahnhof",49.90485,8.67799,"T",2],["Darmstadt-Kranichstein Institutszentrum",49.90298,8.6809,"T",2],["Darmstadt-Kranichstein Esselborn/Ökum.GZ",49.90082,8.68254,"T",2],["Darmstadt-Kranichstein Gruberstraße",49.89829,8.68101,"T",2],["Darmstadt-Kranichstein Siemensstraße",49.89639,8.68004,"T",2],["Darmstadt-Kranichstein Borsdorffstraße/Kreisverwaltung",49.89644,8.67402,"T",2],["Darmstadt Eissporthalle",49.88915,8.66241,"T",2],["Darmstadt TU-Lichtwiese/Campus",49.86216,8.68124,"T",2],["Darmstadt Hochschulstadion",49.86166,8.67396,"T",2],["Darmstadt Maria-Goeppert-Straße",49.86868,8.61996,"T",2],["Darmstadt TZ Rhein Main",49.86983,8.62774,"T",2],["Darmstadt Nordbad",49.88668,8.66154,"T",2],["Darmstadt Waldspirale",49.88692,8.65629,"T",2],["Hessendenkmal",50.11878,8.68927,"T",2],["Friedberger Platz",50.12296,8.69175,"T",2],["Matthias-Beltz-Platz",50.12719,8.69214,"T",2],["Varrentrappstraße",50.11533,8.64739,"T",2],["Lettigkautweg",50.09989,8.70324,"T",2],["Balduinstraße",50.09943,8.71473,"T",2],["Bleiweißstraße",50.0999,8.71891,"T",2],["Buchrainplatz",50.10039,8.72427,"T",2],["Flaschenburgstraße",50.10042,8.7307,"T",2],["Wiener Straße",50.10033,8.73609,"T",2],["Offenbach (Main)-Westend Offenbach Stadtgrenze",50.10194,8.74507,"T",2],["Heister-/Seehofstraße",50.10372,8.69651,"T",2],["Dieselstraße",50.12445,8.74511,"T",2],["Wickerer Straße",50.10107,8.62265,"T",2],["Mönchhofstraße",50.10053,8.61771,"T",2],["Waldschulstraße",50.10029,8.60367,"T",2],["Linnegraben",50.10025,8.5967,"T",2],["Jägerallee",50.10016,8.59081,"T",2],["Birminghamstraße",50.10005,8.5784,"T",2],["Luthmerstraße",50.09935,8.57364,"T",2],["Nied Kirche",50.0985,8.56746,"T",2],["Gerauer Straße",50.08379,8.64463,"T",2],["Melibocusstraße",50.08181,8.63987,"T",2],["Bürostadt Niederrad",50.07808,8.62761,"T",2],["Kiesschneise",50.07651,8.61807,"T",2],["Daimlerstraße",50.12278,8.74112,"T",2],["Schwalbacher Straße",50.10239,8.63655,"T",2],["Rebstöcker Straße",50.10143,8.62819,"T",2],["Allerheiligentor",50.11337,8.69382,"T",2],["Hohenstaufenstraße",50.111,8.65742,"T",2],["Ludwig-Erhard-Anlage",50.11403,8.65021,"T",2],["Hugo-Junkers-Straße",50.12754,8.7531,"T",2],["Finthen, Jupiterweg",49.99598,8.18015,"T",1],["Finthen, Römerquelle",49.99553,8.175,"T",1],["Mainz, Münsterplatz",50.00021,8.263,"T",1],["Finthen, Königsborn",49.99266,8.17919,"T",1],["Finthen, Poststraße",49.98939,8.17853,"T",1],["Mainz, Agentur für Arbeit",49.99728,8.2555,"T",1],["Mainz, Hauptfriedhof/Blindenz.",49.99518,8.25235,"T",1],["Mainz, Römersteine",49.99197,8.25168,"T",1],["Mainz, Zahlbach",49.987,8.25236,"T",1],["Bretzenheim, Lindenm.\\Natursch",49.98436,8.25235,"T",1],["Bretzenheim, Bahnstraße",49.98206,8.24598,"T",1],["Mainz, Straßenbahnamt",50.01612,8.25261,"T",1],["Mainz, Zollhafen/Inge-Reitz-Straße",50.01874,8.25393,"T",1],["Darmstadt-Eberstadt Mittelschneise",49.80247,8.64646,"T",1],["Seeheim-Jugenheim-Malchen",49.79076,8.64884,"T",1],["Darmstadt Kongresszentrum darmstadtium",49.87371,8.65648,"T",1],["Friedberger Warte",50.13985,8.69856,"T",1],["Bodenweg",50.14219,8.70161,"T",1],["Walter-Kolb-Siedlung",50.14684,8.70316,"T",1],["Alkmenestraße",50.1519,8.69981,"T",1],["Gravensteiner-Platz",50.15505,8.69877,"T",1],["Beuthener Straße",50.09144,8.67455,"T",1],["Breslauer Straße",50.09327,8.67771,"T",1],["Nibelungenplatz",50.13025,8.69417,"T",1],["Münzenberger Straße",50.13277,8.69526,"T",1],["Wasserpark",50.13612,8.6968,"T",1],["Adalbert-/Schloßstraße",50.11874,8.64425,"T",1],["Juliusstraße",50.12569,8.64708,"T",1],["Frauenfriedenskirche",50.1287,8.64661,"T",1],["Markus-Krankenhaus",50.13686,8.64587,"T",1],["Waldschmidtstraße",50.11797,8.70151,"T",1],["Habsburger-/Wittelsbacherallee",50.1204,8.70637,"T",1],["Freiligrathstraße",50.12203,8.7099,"T",1],["Saalburg-/Wittelsbacherallee",50.12447,8.71382,"T",1],["Ernst-May-Platz",50.12597,8.71595,"T",1],["Rothschildallee",50.12773,8.69401,"T",1],["Günthersburgpark",50.12874,8.69982,"T",1],["Hartmann-Ibach-Straße",50.12743,8.703,"T",1],["Burgstraße",50.12751,8.70504,"T",1],["Hugo-Junkers-Straße/Schleife",50.126,8.75425,"T",1],["Kriegkstraße",50.1013,8.63969,"T",1],["Galluspark",50.10019,8.63707,"T",1],["Ordnungsamt",50.09876,8.63317,"T",1],["Oberschweinstiege",50.07053,8.67846,"T",1],["Neu-Isenburg Stadtgrenze",50.05986,8.69495,"T",1],["DFB-Campus",50.08304,8.65134,"T",1],["Oberforsthaus",50.07927,8.65435,"T",1],["Waldau",50.07713,8.61012,"T",1],["Waldfriedhof Goldstein",50.07688,8.60305,"T",1],["Harthweg",50.08104,8.59483,"T",1],["Ferdinand-Dirichs-Weg",50.08267,8.58797,"T",1],["Rheinlandstraße",50.08238,8.58199,"T",1],["Stadion Straßenbahn",50.07511,8.65322,"T",1],["Riederhöfe",50.11729,8.72879,"T",1],["Cassellastraße",50.12942,8.75918,"T",1],["Mainkur Bahnhof",50.13264,8.76661,"T",1],["Alt-Fechenheim",50.12814,8.76783,"T",1],["Arthur-von-Weinberg-Steg",50.12496,8.76986,"T",1],["Schießhüttenstraße",50.12209,8.7729,"T",1],["Tillystraße",50.10155,8.56023,"T",1],["Zuckschwerdtstraße",50.10308,8.55257,"T",1],["Zobelstraße",50.11293,8.70135,"T",1],["Ostbahnhof/Sonnemannstraße",50.11165,8.70516,"T",1],["Ostbahnhof/Honsellstraße",50.11126,8.70942,"T",1],["Osthafenplatz",50.11198,8.71371,"T",1],["Schwedlerstraße",50.11388,8.71921,"T",1],["Frankensteiner Platz",50.10632,8.69248,"T",1],["Hospital Zum Heiligen Geist",50.11072,8.69278,"T",1],["Gustavsburgplatz",50.10059,8.63054,"T",1],["Stresemannallee/Mörfelder Landstr",50.08896,8.67171,"T",1],["Nauheimer Straße",50.11689,8.64381,"T",1],["Kuhwaldstraße",50.11697,8.6403,"T",1],["An der Dammheide",50.11735,8.63095,"T",1],["Leonardo-da-Vinci-Allee",50.1135,8.62688,"T",1],["Rebstockbad",50.11367,8.61903,"T",1],["Bolongaropalast",50.10181,8.55272,"T",1],["Haardtwaldplatz",50.08621,8.6363,"T",1],["Odenwaldstraße",50.08641,8.64172,"T",1],["Schwarzwaldstraße",50.08673,8.6464,"T",1],["Frauenhofstraße",50.08722,8.64922,"T",1],["Hauptbahnhof Südseite",50.10561,8.6637,"T",1],["Hafenstraße",50.10315,8.65708,"T",1],["Heilbronner Straße",50.10166,8.65384,"T",1]]};</script>
+<script>
+(() => {
+const API = "https://api.transitous.org/api";
+const REFRESH_MS = 25000;
+const touch = matchMedia("(pointer: coarse)").matches;
+
+const MODES = [
+  {key:"S",    label:"S-Bahn", sym:"S", col:"#3a9a47", api:["METRO","SUBURBAN"], on:true},
+  {key:"U",    label:"U-Bahn", sym:"U", col:"#1760a8", api:["SUBWAY"], on:true},
+  {key:"T",    label:"Tram",   sym:"T", col:"#c8102e", api:["TRAM"], on:true},
+  {key:"R",    label:"Regio/Fern", sym:"R", col:"#6b7785", api:["REGIONAL_RAIL","REGIONAL_FAST_RAIL","HIGHSPEED_RAIL","LONG_DISTANCE","RAIL"], on:false},
+  {key:"B",    label:"Bus",    sym:"B", col:"#8a3f8c", api:["BUS"], on:false},
+];
+const modeOf = {}; MODES.forEach(m => m.api.forEach(a => modeOf[a] = m));
+const modeByKey = {}; MODES.forEach(m => modeByKey[m.key] = m);
+const layers = {net: true, stations: true, labels: true};
+
+// ---------- map ----------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("rml." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("rml." + k, JSON.stringify(v)); } catch {} }
+};
+const saved = store.get("view", null);
+const map = L.map("map", {zoomControl:false, preferCanvas:true, tap:false})
+  .setView(saved ? [saved[0], saved[1]] : [50.1109, 8.6821], saved ? saved[2] : 13);
+map.on("moveend", () => { const c = map.getCenter(); store.set("view", [+c.lat.toFixed(5), +c.lng.toFixed(5), map.getZoom()]); });
+L.control.zoom({position:"bottomright"}).addTo(map);
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/";
+L.tileLayer(ESRI + "World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+  maxZoom: 16, maxNativeZoom: 16,
+  attribution: 'Echtzeit: <a href="https://transitous.org/sources/" target="_blank">Transitous</a> (DELFI/RMV) · Karte © Esri, HERE, OSM-Mitwirkende'
+}).addTo(map);
+L.tileLayer(ESRI + "World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {maxZoom: 16, maxNativeZoom: 16, opacity: .35}).addTo(map);
+map.setMaxZoom(18);
+
+// ---------- static network (S, U, Tram) ----------
+map.createPane("net"); map.getPane("net").style.zIndex = 350;
+const netRenderer = L.canvas({pane: "net", padding: 0.3});
+const netGroups = {S: L.layerGroup(), U: L.layerGroup(), T: L.layerGroup()};
+const netLines = [];
+const NW = z => z < 11 ? 1.2 : z < 13 ? 2 : z < 15 ? 3 : 4;
+for (const [poly, ls] of NET.edges) {
+  const pts = decodeNet(poly), n = ls.length;
+  ls.forEach((l, i) => {
+    const info = NET.lines[l]; if (!info) return;
+    const pl = L.polyline(pts, {renderer: netRenderer, pane: "net", color: info.c, weight: 2, opacity: .8,
+      offset: 0, interactive: false, lineCap: "butt", lineJoin: "round"});
+    pl._k = i - (n - 1) / 2; pl._m = info.m;
+    netGroups[info.m].addLayer(pl); netLines.push(pl);
+  });
+}
+function styleNet() {
+  const z = map.getZoom(), w = NW(z);
+  for (const pl of netLines) {
+    const wm = pl._m === "T" ? w * .75 : w;
+    pl.setStyle({weight: wm, offset: pl._k * wm, opacity: z < 12 && pl._m === "T" ? .45 : .8});
+  }
+}
+function syncNet() {
+  for (const k in netGroups) {
+    const want = layers.net && modeByKey[k].on;
+    if (want && !map.hasLayer(netGroups[k])) map.addLayer(netGroups[k]);
+    if (!want && map.hasLayer(netGroups[k])) map.removeLayer(netGroups[k]);
+  }
+}
+map.on("zoomend", styleNet);
+function decodeNet(s) { return decodePolyline(s, 5); }
+const STATIONS = NET.stations.map(([name, lat, lng, modes, nl]) => ({name, lat, lng, modes, nl, rail: /[SU]/.test(modes)}))
+  .sort((a, b) => (b.rail - a.rail) || (b.nl - a.nl));
+
+// ---------- helpers ----------
+function decodePolyline(s, p = 5) {
+  let i = 0, lat = 0, lng = 0; const out = []; const f = Math.pow(10, p);
+  while (i < s.length) {
+    for (let k = 0; k < 2; k++) {
+      let r = 0, sh = 0, b;
+      do { b = s.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32);
+      const v = (r & 1) ? ~(r >> 1) : (r >> 1);
+      if (k === 0) lat += v; else lng += v;
+    }
+    out.push([lat / f, lng / f]);
+  }
+  return out;
+}
+function cumDist(pts) {
+  const c = [0];
+  for (let i = 1; i < pts.length; i++) {
+    const dy = (pts[i][0] - pts[i-1][0]) * 111320;
+    const dx = (pts[i][1] - pts[i-1][1]) * 111320 * Math.cos(pts[i][0] * Math.PI / 180);
+    c.push(c[i-1] + Math.hypot(dx, dy));
+  }
+  return c;
+}
+function pointAt(seg, frac) {
+  const {pts, cum} = seg, total = cum[cum.length - 1];
+  if (pts.length < 2 || total === 0) return {lat: pts[0][0], lng: pts[0][1], hd: null};
+  const d = frac * total;
+  let i = 1; while (i < cum.length - 1 && cum[i] < d) i++;
+  const a = pts[i-1], b = pts[i], span = cum[i] - cum[i-1] || 1, t = Math.min(1, Math.max(0, (d - cum[i-1]) / span));
+  const lat = a[0] + (b[0] - a[0]) * t, lng = a[1] + (b[1] - a[1]) * t;
+  const hd = Math.atan2(-(b[0] - a[0]), (b[1] - a[1]) * Math.cos(lat * Math.PI / 180)); // screen angle
+  return {lat, lng, hd};
+}
+const ease = f => 0.35 * f + 0.65 * (f * f * (3 - 2 * f)); // gentle accel/brake
+const t2ms = s => s ? Date.parse(s) : NaN;
+const hhmm = ms => new Date(ms).toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit"});
+const cleanName = n => (n || "").replace(/^Frankfurt \(Main\)\s*/, "").replace(/^Frankfurt am Main[, -]*/,"");
+function delayColor(min) {
+  if (min == null) return "#8c9aaa";
+  if (min < 1) return "#3ecf8e";
+  if (min < 3) return "#f5c542";
+  if (min < 6) return "#ff8a3d";
+  return "#ff4d5e";
+}
+function textOn(hex) {
+  const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  return (0.299*r + 0.587*g + 0.114*b) > 165 ? "#111" : "#fff";
+}
+
+// ---------- state ----------
+const trips = new Map(); // tripId -> {id, line, color, mode, segs: Map(depKey -> seg), rt}
+let lastOk = 0, loading = false, colorBy = "line", lineFilter = null, selected = null, routeLayer = null;
+let drawn = [];  // for hit tests
+
+function ingest(list) {
+  for (const s of list) {
+    const m = modeOf[s.mode]; if (!m) continue;
+    const tr = s.trips && s.trips[0]; if (!tr) continue;
+    let t = trips.get(tr.tripId);
+    if (!t) {
+      t = {id: tr.tripId, line: tr.routeShortName || "?", color: "#" + (s.routeColor || m.col.slice(1)), mode: m, segs: new Map()};
+      trips.set(tr.tripId, t);
+    }
+    const pts = s.polyline ? decodePolyline(s.polyline) : [[s.from.lat, s.from.lon], [s.to.lat, s.to.lon]];
+    const seg = {
+      dep: t2ms(s.departure), arr: t2ms(s.arrival),
+      sdep: t2ms(s.scheduledDeparture), sarr: t2ms(s.scheduledArrival),
+      from: s.from.name, to: s.to.name, rt: s.realTime, pts, cum: cumDist(pts)
+    };
+    t.segs.set(s.from.stopId + "|" + seg.sdep, seg);
+    t.sorted = null;
+  }
+}
+function prune() {
+  const cut = Date.now() - 4 * 60000;
+  for (const [id, t] of trips) {
+    for (const [k, s] of t.segs) if (s.arr < cut) t.segs.delete(k);
+    t.sorted = null;
+    if (!t.segs.size) trips.delete(id);
+  }
+}
+
+async function load() {
+  if (loading) return; loading = true;
+  const b = map.getBounds().pad(0.25), now = Date.now();
+  const params = new URLSearchParams({
+    min: `${b.getSouth().toFixed(4)},${b.getWest().toFixed(4)}`,
+    max: `${b.getNorth().toFixed(4)},${b.getEast().toFixed(4)}`,
+    startTime: new Date(now - 2 * 60000).toISOString(),
+    endTime: new Date(now + 2.5 * 60000).toISOString(),
+    zoom: String(Math.max(10, Math.round(map.getZoom())))
+  });
+  try {
+    const r = await fetch(`${API}/v1/map/trips?${params}`);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    ingest(await r.json()); prune();
+    lastOk = Date.now();
+    document.getElementById("dot").classList.remove("err");
+  } catch (e) {
+    document.getElementById("dot").classList.add("err");
+    document.getElementById("st").textContent = "Keine Verbindung zur Datenquelle (" + e.message + "), neuer Versuch läuft …";
+  } finally { loading = false; }
+}
+
+// ---------- position of a trip right now ----------
+function vehicleNow(t, now) {
+  if (!t.sorted) t.sorted = [...t.segs.values()].sort((a, b) => a.dep - b.dep);
+  const S = t.sorted; if (!S.length) return null;
+  for (let i = 0; i < S.length; i++) {
+    const s = S[i];
+    if (now >= s.dep && now <= s.arr) {
+      const f = s.arr > s.dep ? (now - s.dep) / (s.arr - s.dep) : 1;
+      const p = pointAt(s, ease(f));
+      return {...p, delay: (s.arr - s.sarr) / 60000, next: s.to, prev: s.from, moving: true, rt: s.rt};
+    }
+    if (now < s.dep) {
+      const prev = S[i-1];
+      if (prev ? now >= prev.arr : s.dep - now < 90000) {
+        const p = pointAt(s, 0);
+        return {...p, hd: pointAt(s, 0.05).hd, delay: (s.dep - s.sdep) / 60000, next: s.to, prev: s.from, at: s.from, moving: false, rt: s.rt};
+      }
+      return null;
+    }
+  }
+  const last = S[S.length - 1];
+  if (now - last.arr < 40000) {
+    const p = pointAt(last, 1);
+    return {...p, delay: (last.arr - last.sarr) / 60000, next: last.to, at: last.to, moving: false, rt: last.rt};
+  }
+  return null;
+}
+
+// ---------- drawing ----------
+const cv = document.getElementById("fx"), ctx = cv.getContext("2d");
+function resize() {
+  const r = map.getContainer().getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  cv.width = r.width * d; cv.height = r.height * d; cv.style.width = r.width + "px"; cv.style.height = r.height + "px";
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+}
+window.addEventListener("resize", resize); resize();
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+function drawStations(z, W, H) {
+  if (!layers.stations || z < 11) return;
+  const showTram = z >= 13 && modeByKey.T.on, occ = [];
+  const labelRail = layers.labels && z >= 13, labelTram = layers.labels && z >= 15;
+  const fits = (x, y, w, h) => { for (const o of occ) if (x < o[0] + o[2] && x + w > o[0] && y < o[1] + o[3] && y + h > o[1]) return false; occ.push([x, y, w, h]); return true; };
+  ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  ctx.font = `500 11px "Barlow", system-ui, sans-serif`;
+  ctx.lineJoin = "round";
+  for (const st of STATIONS) {
+    const on = (st.modes.includes("S") && modeByKey.S.on) || (st.modes.includes("U") && modeByKey.U.on) || (st.modes.includes("T") && showTram);
+    if (!on) continue;
+    if (!st.rail && !showTram) continue;
+    const pt = map.latLngToContainerPoint([st.lat, st.lng]);
+    if (pt.x < -60 || pt.y < -20 || pt.x > W + 60 || pt.y > H + 20) continue;
+    const big = st.rail && (st.nl >= 3 || z >= 14), r = st.rail ? (big ? 4.5 : 3.5) : 2.6;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, 7);
+    ctx.fillStyle = "#f2f5f8"; ctx.fill(); ctx.lineWidth = st.rail ? 1.8 : 1.2; ctx.strokeStyle = "#10151b"; ctx.stroke();
+    if (st.rail ? labelRail : labelTram) {
+      const tw = ctx.measureText(st.name).width, lx = pt.x + r + 4, ly = pt.y;
+      if (fits(lx - 2, ly - 8, tw + 4, 16)) {
+        ctx.lineWidth = 3; ctx.strokeStyle = "#10151bd9"; ctx.strokeText(st.name, lx, ly);
+        ctx.fillStyle = st.rail ? "#dbe3ea" : "#a3b0bd"; ctx.fillText(st.name, lx, ly);
+      }
+    }
+  }
+  ctx.textAlign = "center";
+}
+
+let statTick = 0;
+function frame() {
+  const now = Date.now(), z = map.getZoom(), W = cv.clientWidth, H = cv.clientHeight;
+  ctx.clearRect(0, 0, W, H);
+  const list = [];
+  for (const t of trips.values()) {
+    if (!t.mode.on) continue;
+    if (lineFilter && !lineFilter.has(t.line.toUpperCase())) continue;
+    const v = vehicleNow(t, now); if (!v) continue;
+    const pt = map.latLngToContainerPoint([v.lat, v.lng]);
+    if (pt.x < -30 || pt.y < -30 || pt.x > W + 30 || pt.y > H + 30) { list.push({t, v, pt, off: true}); continue; }
+    list.push({t, v, pt});
+  }
+  drawStations(z, W, H);
+  // draw trams/bus first, then U, then S on top
+  const order = {B:0, T:1, R:2, U:3, S:4};
+  list.sort((a, b) => order[a.t.mode.key] - order[b.t.mode.key] || (a.t === selected) - (b.t === selected));
+  const compact = z < 12.5;
+  drawn = [];
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const it of list) {
+    if (it.off) continue;
+    const {t, v, pt} = it, sel = selected && selected.id === t.id;
+    const fill = colorBy === "delay" ? delayColor(v.rt ? Math.max(0, v.delay) : null) : t.color;
+    if (compact) {
+      const r = sel ? 6 : 4;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, 7); ctx.fillStyle = fill; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = colorBy === "line" && v.rt && v.delay >= 3 ? delayColor(v.delay) : "#0b0f14"; ctx.stroke();
+      drawn.push({t, x: pt.x, y: pt.y, r: 8});
+      continue;
+    }
+    const label = t.line;
+    ctx.font = `700 ${sel ? 14 : 12}px "Barlow Condensed", "Arial Narrow", sans-serif`;
+    const h = sel ? 20 : 16, w = Math.max(h, ctx.measureText(label).width + 10), x = pt.x - w / 2, y = pt.y - h / 2;
+    // heading chevron
+    if (v.hd != null) {
+      const ang = v.hd, rx = w / 2 + 3, ry = h / 2 + 3;
+      const cx = pt.x + Math.cos(ang) * rx, cy = pt.y + Math.sin(ang) * ry;
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
+      ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(-2, -4.5); ctx.lineTo(-2, 4.5); ctx.closePath();
+      ctx.fillStyle = fill; ctx.fill(); ctx.restore();
+    }
+    // body
+    ctx.shadowColor = "#000a"; ctx.shadowBlur = 4;
+    roundRect(x, y, w, h, t.mode.key === "S" || t.mode.key === "B" ? h / 2 : 3.5);
+    ctx.fillStyle = fill; ctx.fill(); ctx.shadowBlur = 0;
+    ctx.lineWidth = sel ? 2.5 : 1.25;
+    ctx.strokeStyle = sel ? "#ffffff" : "#0b0f14"; ctx.stroke();
+    if (!v.rt) { ctx.setLineDash([2, 2]); ctx.strokeStyle = "#e8edf2"; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]); }
+    ctx.fillStyle = textOn(fill); ctx.fillText(label, pt.x, pt.y + 0.5);
+    // delay badge
+    if (v.rt && v.delay >= 1 && colorBy === "line") {
+      const txt = "+" + Math.round(v.delay);
+      ctx.font = `700 11px "Barlow Condensed", "Arial Narrow", sans-serif`;
+      const bw = ctx.measureText(txt).width + 7, bx = x + w - 3, by = y - 7;
+      roundRect(bx, by, bw, 12, 6); ctx.fillStyle = delayColor(v.delay); ctx.fill();
+      ctx.fillStyle = v.delay < 3 ? "#111" : "#fff"; ctx.fillText(txt, bx + bw / 2, by + 6.5);
+    }
+    drawn.push({t, x: pt.x, y: pt.y, r: Math.max(w, h) / 2 + 4});
+  }
+  if (++statTick % 30 === 0) stats(list, now);
+  requestAnimationFrame(frame);
+}
+
+// ---------- side panel ----------
+const $ = id => document.getElementById(id);
+function stats(list, now) {
+  $("clock").textContent = new Date(now).toLocaleTimeString("de-DE");
+  if (lastOk) {
+    const age = Math.round((now - lastOk) / 1000);
+    $("st").textContent = `Live · aktualisiert vor ${age} s · ${trips.size} Fahrten geladen`;
+  }
+  const counts = {}; MODES.forEach(m => counts[m.key] = 0);
+  for (const t of trips.values()) { const v = vehicleNow(t, now); if (v) counts[t.mode.key]++; }
+  MODES.forEach(m => { const el = document.querySelector(`[data-m="${m.key}"] .n`); if (el) el.textContent = counts[m.key]; });
+
+  const vis = list.filter(i => i.v.rt);
+  const buckets = [0, 0, 0, 0]; let sum = 0;
+  for (const i of vis) { const d = Math.max(0, i.v.delay); sum += d; buckets[d < 1 ? 0 : d < 3 ? 1 : d < 6 ? 2 : 3]++; }
+  $("sN").textContent = list.length;
+  $("sP").textContent = vis.length ? Math.round(100 * (buckets[0] + buckets[1]) / vis.length) + " %" : "–";
+  $("sA").textContent = vis.length ? (sum / vis.length).toFixed(1).replace(".", ",") + "′" : "–";
+  const cols = ["var(--ok)", "var(--warn)", "var(--late)", "var(--bad)"];
+  $("bar").innerHTML = vis.length ? buckets.map((b, k) => `<i style="width:${100 * b / vis.length}%;background:${cols[k]}"></i>`).join("") : "";
+
+  const worst = vis.filter(i => i.v.delay >= 2).sort((a, b) => b.v.delay - a.v.delay).slice(0, 6);
+  $("worst").innerHTML = worst.length ? "" : `<li style="cursor:default;color:var(--muted)">Keine nennenswerten Verspätungen im Bild.</li>`;
+  for (const i of worst) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="sym" style="background:${i.t.color};color:${textOn(i.t.color)};padding:0 4px"></span><span class="t"></span><span class="d" style="color:${delayColor(i.v.delay)}">+${Math.round(i.v.delay)}</span>`;
+    li.children[0].textContent = i.t.line;
+    li.children[1].textContent = "→ " + cleanName(i.v.next);
+    li.onclick = () => { map.flyTo([i.v.lat, i.v.lng], Math.max(map.getZoom(), 14), {duration: .8}); select(i.t); };
+    $("worst").appendChild(li);
+  }
+  if (selected) updateInfoLive(now);
+}
+
+function buildModes() {
+  const sm = store.get("modes", null); if (sm) MODES.forEach(m => { if (m.key in sm) m.on = !!sm[m.key]; });
+  const sl = store.get("layers", null); if (sl) Object.assign(layers, sl);
+  const sc = store.get("colorBy", null); if (sc) colorBy = sc;
+  const box = $("modes");
+  for (const m of MODES) {
+    const b = document.createElement("button");
+    b.className = "chip"; b.dataset.m = m.key; b.setAttribute("aria-pressed", m.on);
+    b.innerHTML = `<span class="sym" style="background:${m.col}">${m.sym}</span>${m.label}<span class="n">0</span>`;
+    b.onclick = () => { m.on = !m.on; b.setAttribute("aria-pressed", m.on); syncNet(); store.set("modes", Object.fromEntries(MODES.map(x => [x.key, x.on]))); };
+    box.appendChild(b);
+  }
+  $("cmLine").setAttribute("aria-pressed", colorBy === "line"); $("cmDelay").setAttribute("aria-pressed", colorBy === "delay");
+  $("cmLine").onclick = () => { colorBy = "line"; store.set("colorBy", colorBy); $("cmLine").setAttribute("aria-pressed", true); $("cmDelay").setAttribute("aria-pressed", false); };
+  $("cmDelay").onclick = () => { colorBy = "delay"; store.set("colorBy", colorBy); $("cmDelay").setAttribute("aria-pressed", true); $("cmLine").setAttribute("aria-pressed", false); };
+  $("q").oninput = e => {
+    const parts = e.target.value.toUpperCase().split(/[\s,;]+/).filter(Boolean);
+    lineFilter = parts.length ? new Set(parts) : null;
+    // switch on the mode of a typed line automatically
+    if (lineFilter) for (const t of trips.values()) if (lineFilter.has(t.line.toUpperCase()) && !t.mode.on) {
+      t.mode.on = true; document.querySelector(`[data-m="${t.mode.key}"]`).setAttribute("aria-pressed", true); syncNet();
+    }
+  };
+  $("toggle").onclick = () => $("hud").classList.toggle("collapsed");
+  for (const [id, key] of [["lyNet", "net"], ["lyStations", "stations"], ["lyLabels", "labels"]]) {
+    $(id).onclick = () => { layers[key] = !layers[key]; $(id).setAttribute("aria-pressed", layers[key]); if (key === "net") syncNet(); store.set("layers", layers); };
+    $(id).setAttribute("aria-pressed", layers[key]);
+  }
+  if (matchMedia("(max-width:640px)").matches) $("hud").classList.add("collapsed");
+}
+
+// ---------- selection / trip details ----------
+let detail = null;
+async function select(t) {
+  selected = t; detail = null;
+  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+  renderInfo(); $("info").hidden = false;
+  try {
+    const r = await fetch(`${API}/v5/trip?tripId=${encodeURIComponent(t.id)}`);
+    if (!r.ok) throw new Error();
+    const d = await r.json(); const leg = d.legs && d.legs[0];
+    if (!leg || selected !== t) return;
+    detail = leg;
+    if (leg.legGeometry && leg.legGeometry.points) {
+      const pts = decodePolyline(leg.legGeometry.points, leg.legGeometry.precision || 6);
+      routeLayer = L.polyline(pts, {color: t.color, weight: 5, opacity: .55}).addTo(map);
+    }
+    renderInfo();
+  } catch { if (selected === t) { detail = {error: true}; renderInfo(); } }
+}
+function deselect() { selected = null; detail = null; $("info").hidden = true; if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; } }
+
+function renderInfo() {
+  const t = selected; if (!t) return;
+  const v = vehicleNow(t, Date.now()) || {};
+  const head = detail && detail.headsign ? cleanName(detail.headsign) : "Ziel wird geladen …";
+  const el = $("info");
+  el.innerHTML = `
+    <div class="ih">
+      <span class="big" style="background:${t.color};color:${textOn(t.color)}"></span>
+      <div class="dir"><b id="iHead"></b><span id="iSub"></span></div>
+      <button class="x" id="iClose" aria-label="Schließen">×</button>
+    </div>
+    <div class="delaybox">
+      <div><b id="iDelay">–</b><span>Verspätung</span></div>
+      <div style="min-width:0"><b id="iNext" style="font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">–</b><span id="iNextL">Nächster Halt</span></div>
+    </div>
+    <ol id="stops"></ol>`;
+  el.querySelector(".big").textContent = t.line;
+  $("iHead").textContent = "→ " + head;
+  $("iSub").textContent = t.mode.label + (detail && detail.agencyName ? " · " + detail.agencyName : "");
+  $("iClose").onclick = deselect;
+  if (detail && detail.error) $("stops").outerHTML = `<div class="note">Fahrtverlauf konnte nicht geladen werden.</div>`;
+  else if (detail) {
+    const all = [detail.from, ...(detail.intermediateStops || []), detail.to];
+    const ol = $("stops");
+    for (const s of all) {
+      const tReal = t2ms(s.departure || s.arrival), tPlan = t2ms(s.scheduledDeparture || s.scheduledArrival);
+      const li = document.createElement("li"); li.dataset.t = tReal;
+      const late = Math.round((tReal - tPlan) / 60000);
+      li.innerHTML = `<span class="dot"></span><span class="nm"></span><span class="tm"></span>`;
+      li.querySelector(".nm").textContent = cleanName(s.name) + (s.cancelled ? " (entfällt)" : "");
+      li.querySelector(".tm").innerHTML = late >= 1
+        ? `<s>${hhmm(tPlan)}</s><span style="color:${delayColor(late)}">${hhmm(tReal)}</span>`
+        : hhmm(tReal);
+      ol.appendChild(li);
+    }
+  } else $("stops").outerHTML = `<div class="note">Lade Fahrtverlauf …</div>`;
+  updateInfoLive(Date.now(), v, true);
+}
+function updateInfoLive(now, v, scroll) {
+  const t = selected; if (!t || !$("iDelay")) return;
+  v = v || vehicleNow(t, now);
+  if (!v) { $("iDelay").textContent = "–"; $("iNext").textContent = "Fahrt beendet"; return; }
+  const d = v.rt ? Math.round(Math.max(0, v.delay)) : null;
+  $("iDelay").textContent = d == null ? "Plan" : d === 0 ? "pünktlich" : "+" + d + " min";
+  $("iDelay").style.color = delayColor(d);
+  $("iNext").textContent = cleanName(v.at && !v.moving ? v.at : v.next);
+  $("iNextL").textContent = v.at && !v.moving ? "Steht an" : "Nächster Halt";
+  let nextMarked = false;
+  document.querySelectorAll("#stops li").forEach(li => {
+    const past = +li.dataset.t < now - 20000;
+    li.classList.toggle("past", past);
+    const isNext = !past && !nextMarked; li.classList.toggle("next", isNext);
+    if (isNext) { nextMarked = true; if (scroll) li.scrollIntoView({block: "center"}); }
+  });
+}
+
+map.on("click", e => {
+  const p = e.containerPoint; let best = null, bd = 1e9;
+  for (const d of drawn) { const dd = Math.hypot(d.x - p.x, d.y - p.y); if (dd < d.r + (touch ? 10 : 0) && dd < bd) { bd = dd; best = d; } }
+  if (best) select(best.t); else deselect();
+});
+map.on("mousemove", e => {
+  const p = e.containerPoint;
+  map.getContainer().style.cursor = drawn.some(d => Math.hypot(d.x - p.x, d.y - p.y) < d.r) ? "pointer" : "";
+});
+let mvTimer; map.on("moveend", () => { clearTimeout(mvTimer); mvTimer = setTimeout(load, 400); });
+
+buildModes();
+styleNet(); syncNet();
+load();
+setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+
+// ---------- my location ----------
+let me = null, meWatch = null;
+$("locate").onclick = () => {
+  if (meWatch != null) {
+    navigator.geolocation.clearWatch(meWatch); meWatch = null;
+    if (me) { map.removeLayer(me.dot); map.removeLayer(me.acc); me = null; }
+    $("locate").setAttribute("aria-pressed", false); return;
+  }
+  if (!navigator.geolocation) return;
+  $("locate").setAttribute("aria-pressed", true);
+  let first = true;
+  meWatch = navigator.geolocation.watchPosition(pos => {
+    const ll = [pos.coords.latitude, pos.coords.longitude];
+    if (!me) me = {
+      acc: L.circle(ll, {radius: pos.coords.accuracy, color: "#5ec8ff", weight: 1, fillOpacity: .08, interactive: false}).addTo(map),
+      dot: L.circleMarker(ll, {radius: 7, color: "#fff", weight: 2.5, fillColor: "#2f8fff", fillOpacity: 1, interactive: false}).addTo(map)
+    };
+    me.dot.setLatLng(ll); me.acc.setLatLng(ll).setRadius(pos.coords.accuracy);
+    if (first) { map.flyTo(ll, Math.max(map.getZoom(), 15), {duration: .8}); first = false; }
+  }, () => {
+    $("locate").setAttribute("aria-pressed", false); meWatch = null;
+    $("st").textContent = "Standort nicht verfügbar. Bitte Standortfreigabe für diese Seite erlauben.";
+  }, {enableHighAccuracy: true, maximumAge: 10000});
+};
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => requestAnimationFrame(frame));
+})();
+</script>
+</body>
+</html>
