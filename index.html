@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Rhein-Main Live</title>
-<meta name="description" content="Live-Karte der S-Bahnen, U-Bahnen und Trams im Rhein-Main-Gebiet mit Verspätungen.">
+<title>Public Transport Live</title>
+<meta name="description" content="Live-Karte von Bahnen, Trams und Bussen mit Verspätungen, mit Liniennetz für das Rhein-Main-Gebiet.">
 <meta name="theme-color" content="#10151b">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="RM Live">
+<meta name="apple-mobile-web-app-title" content="PT Live">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
@@ -40,7 +40,7 @@
         backdrop-filter:blur(8px);box-shadow:0 8px 28px #0007}
   #hud{top:calc(12px + env(safe-area-inset-top,0px));left:12px;width:292px;max-width:calc(100vw - 24px);padding:14px 14px 12px}
   .head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-  h1{font:700 26px/1 var(--display);letter-spacing:.01em;margin:0;text-transform:uppercase}
+  h1{font:700 21px/1.05 var(--display);letter-spacing:.01em;margin:0;text-transform:uppercase}
   #clock{font:600 22px/1 var(--display);font-variant-numeric:tabular-nums;color:var(--accent)}
   .status{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;margin-top:6px}
   .pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 var(--ok);animation:p 2s infinite}
@@ -106,7 +106,7 @@
     #hud.collapsed .body{display:none}
     #toggle{display:block;position:absolute;right:6px;top:4px;font-size:22px;padding:8px 10px}
     #hud .head{padding-right:40px}
-    h1{font-size:22px}
+    h1{font-size:19px}
     #clock{font-size:19px}
     .chip{padding:8px 11px;font-size:14px}
     .seg button{padding:9px 8px;font-size:14px}
@@ -126,7 +126,7 @@
 
 <section id="hud" class="card" aria-label="Steuerung">
   <button class="x" id="toggle" aria-label="Panel ein-/ausklappen">☰</button>
-  <div class="head"><h1>Rhein-Main Live</h1><span id="clock">--:--:--</span></div>
+  <div class="head"><h1>Public Transport Live</h1><span id="clock">--:--:--</span></div>
   <div class="status"><span class="pulse" id="dot"></span><span id="st">Lade Echtzeitdaten …</span></div>
   <div class="body">
     <div class="lbl">Verkehrsmittel</div>

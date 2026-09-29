@@ -1,7 +1,7 @@
 {
-  "name": "Rhein-Main Live",
-  "short_name": "RM Live",
-  "description": "Live-Karte der S-Bahnen, U-Bahnen und Trams im Rhein-Main-Gebiet mit Verspätungen.",
+  "name": "Public Transport Live",
+  "short_name": "PT Live",
+  "description": "Live-Karte von Bahnen, Trams und Bussen mit Verspätungen.",
   "lang": "de",
   "start_url": "./",
   "scope": "./",

@@ -1,8 +1,8 @@
-# Rhein-Main Live
+# Public Transport Live
 
-Live-Karte der S-Bahnen, U-Bahnen und Trams im Rhein-Main-Gebiet. Die Fahrzeuge bewegen sich in Echtzeit über das Liniennetz, Verspätungen werden farbig angezeigt.
+Live-Karte des öffentlichen Verkehrs mit Verspätungsanzeige. Fahrzeuge werden überall angezeigt, wo die Datenquelle Transitous Fahrplan- und Echtzeitdaten hat (große Teile Europas und weitere Regionen). Liniennetz und Stationen sind derzeit für das Rhein-Main-Gebiet eingebaut.
 
-**Karte öffnen:** https://janheisig.github.io/rhein-main-live/
+**Karte öffnen:** https://janheisig.github.io/public-transport-live/
 
 Auf dem Handy im Browser öffnen und über „Zum Home-Bildschirm“ als App ablegen.
 
