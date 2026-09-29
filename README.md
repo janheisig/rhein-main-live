@@ -1,6 +1,6 @@
 # Public Transport Live
 
-Live-Karte des öffentlichen Verkehrs mit Verspätungsanzeige. Fahrzeuge werden überall angezeigt, wo die Datenquelle Transitous Fahrplan- und Echtzeitdaten hat (große Teile Europas und weitere Regionen). Liniennetz und Stationen sind derzeit für das Rhein-Main-Gebiet eingebaut.
+Live-Karte des öffentlichen Verkehrs mit Verspätungsanzeige. Fahrzeuge werden überall angezeigt, wo die Datenquelle Transitous Fahrplan- und Echtzeitdaten hat (große Teile Europas und weitere Regionen). Liniennetz und Stationen sind für das Rhein-Main-Gebiet fest eingebaut. Überall sonst zeichnet sich das Netz beim Zuschauen selbst: Jede Strecke, auf der ein Fahrzeug gefahren ist, bleibt in Linienfarbe samt Halten auf der Karte (gespeichert im Browser, bis zu 60 Tage).
 
 **Karte öffnen:** https://janheisig.github.io/rhein-main-live/
 

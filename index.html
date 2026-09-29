@@ -59,6 +59,8 @@
   .seg button[aria-pressed="true"]{background:#223040;color:var(--ink)}
   #q{width:100%;box-sizing:border-box;background:#0f141a;border:1px solid var(--line);border-radius:6px;color:var(--ink);padding:7px 9px;font:500 13px var(--ui)}
   #q::placeholder{color:#5f6d7c}
+  .dynnote{margin-top:8px;font-size:12px;color:var(--muted);line-height:1.4}
+  .linkbtn{appearance:none;border:0;background:none;color:var(--accent);font:inherit;padding:0;cursor:pointer;text-decoration:underline}
   .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:4px}
   .stat b{display:block;font:700 24px/1 var(--display);font-variant-numeric:tabular-nums}
   .stat span{font-size:11px;color:var(--muted)}
@@ -137,6 +139,7 @@
       <button class="chip" id="lyStations" aria-pressed="true">Stationen</button>
       <button class="chip" id="lyLabels" aria-pressed="true">Namen</button>
     </div>
+    <div class="dynnote"><span id="dynCount">Außerhalb von Rhein-Main zeichnet sich das Netz beim Zuschauen selbst.</span> <button class="linkbtn" id="dynReset">Zurücksetzen</button></div>
     <div class="lbl">Einfärbung</div>
     <div class="seg" id="colorMode">
       <button id="cmLine" aria-pressed="true">Linienfarbe</button>
@@ -206,8 +209,8 @@ map.setMaxZoom(18);
 // ---------- static network (S, U, Tram) ----------
 map.createPane("net"); map.getPane("net").style.zIndex = 350;
 const netRenderer = L.canvas({pane: "net", padding: 0.3});
-const netGroups = {S: L.layerGroup(), U: L.layerGroup(), T: L.layerGroup()};
-const netLines = [];
+const netGroups = {S: L.layerGroup(), U: L.layerGroup(), T: L.layerGroup(), R: L.layerGroup(), B: L.layerGroup()};
+const netLines = new Set();
 const NW = z => z < 11 ? 1.2 : z < 13 ? 2 : z < 15 ? 3 : 4;
 for (const [poly, ls] of NET.edges) {
   const pts = decodeNet(poly), n = ls.length;
@@ -216,15 +219,17 @@ for (const [poly, ls] of NET.edges) {
     const pl = L.polyline(pts, {renderer: netRenderer, pane: "net", color: info.c, weight: 2, opacity: .8,
       offset: 0, interactive: false, lineCap: "butt", lineJoin: "round"});
     pl._k = i - (n - 1) / 2; pl._m = info.m;
-    netGroups[info.m].addLayer(pl); netLines.push(pl);
+    netGroups[info.m].addLayer(pl); netLines.add(pl);
   });
+}
+function styleOne(pl, z = map.getZoom(), w = NW(z)) {
+  const f = {S: 1, U: 1, R: .9, T: .75, B: .5}[pl._m] || 1, wm = w * f;
+  const op = pl._m === "B" ? .5 : (z < 12 && pl._m === "T" ? .45 : .8);
+  pl.setStyle({weight: wm, offset: pl._k * wm, opacity: op});
 }
 function styleNet() {
   const z = map.getZoom(), w = NW(z);
-  for (const pl of netLines) {
-    const wm = pl._m === "T" ? w * .75 : w;
-    pl.setStyle({weight: wm, offset: pl._k * wm, opacity: z < 12 && pl._m === "T" ? .45 : .8});
-  }
+  for (const pl of netLines) styleOne(pl, z, w);
 }
 function syncNet() {
   for (const k in netGroups) {
@@ -235,8 +240,134 @@ function syncNet() {
 }
 map.on("zoomend", styleNet);
 function decodeNet(s) { return decodePolyline(s, 5); }
-const STATIONS = NET.stations.map(([name, lat, lng, modes, nl]) => ({name, lat, lng, modes, nl, rail: /[SU]/.test(modes)}))
-  .sort((a, b) => (b.rail - a.rail) || (b.nl - a.nl));
+const STATIONS = NET.stations.map(([name, lat, lng, modes, nl]) => ({name, lat, lng, modes, nl, rail: /[SUR]/.test(modes)}));
+const stationsByName = new Map();
+const suffixCount = new Map(); let suffixVer = 0;
+function displayName(st) {
+  if (st.dn !== undefined && st.dnv === suffixVer) return st.dn;
+  const m = / \(([^()]+)\)$/.exec(st.name);
+  st.dn = m && (suffixCount.get(m[1]) || 0) >= 12 ? st.name.slice(0, m.index) : st.name; st.dnv = suffixVer;
+  return st.dn;
+}
+function indexStation(st) {
+  const m = / \(([^()]+)\)$/.exec(st.name); if (m) { suffixCount.set(m[1], (suffixCount.get(m[1]) || 0) + 1); suffixVer++; } let a = stationsByName.get(st.name); if (!a) stationsByName.set(st.name, a = []); a.push(st); }
+STATIONS.forEach(indexStation);
+let stationsDirty = true;
+function sortStations() { STATIONS.sort((a, b) => (b.rail - a.rail) || (b.nl - a.nl)); stationsDirty = false; }
+
+// ---------- self-drawing network ----------
+// Outside the built-in Rhein-Main network (and for Regio/Bus everywhere) the map remembers
+// every stretch a vehicle has driven and draws it in the line colour, together with its stops.
+const STATIC_BOX = [49.80, 8.05, 50.45, 9.25];
+const inStatic = (lat, lng) => lat > STATIC_BOX[0] && lat < STATIC_BOX[2] && lng > STATIC_BOX[1] && lng < STATIC_BOX[3];
+const DYN_MAX_EDGES = 9000, DYN_MAX_STATIONS = 7000, DYN_MAX_AGE = 60 * 864e5;
+const dyn = {edges: new Map(), pairs: new Map(), stations: new Map(), dirty: false};
+function encodePolyline(pts) {
+  let out = "", pl = 0, pg = 0;
+  for (const [la, lo] of pts) {
+    const a = Math.round(la * 1e5), b = Math.round(lo * 1e5);
+    for (let v of [a - pl, b - pg]) {
+      v = v < 0 ? ~(v << 1) : v << 1;
+      while (v >= 0x20) { out += String.fromCharCode((0x20 | (v & 0x1f)) + 63); v >>= 5; }
+      out += String.fromCharCode(v + 63);
+    }
+    pl = a; pg = b;
+  }
+  return out;
+}
+function simplify(pts, eps = 4e-5) {
+  if (pts.length < 3) return pts;
+  const a = pts[0], b = pts[pts.length - 1]; let best = 0, idx = 0;
+  const dx = b[1] - a[1], dy = b[0] - a[0], len = Math.hypot(dx, dy);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const p = pts[i];
+    const d = len === 0 ? Math.hypot(p[0] - a[0], p[1] - a[1]) : Math.abs(dy * (p[1] - a[1]) - dx * (p[0] - a[0])) / len;
+    if (d > best) { best = d; idx = i; }
+  }
+  if (best <= eps) return [a, b];
+  return simplify(pts.slice(0, idx + 1), eps).slice(0, -1).concat(simplify(pts.slice(idx), eps));
+}
+const lineCmp = (a, b) => a.l.localeCompare(b.l, "de", {numeric: true});
+function addDynEdge(rec) {
+  rec.pl = L.polyline(decodePolyline(rec.p), {renderer: netRenderer, pane: "net", color: rec.c, weight: 2, opacity: .8,
+    offset: 0, interactive: false, lineCap: "butt", lineJoin: "round"});
+  rec.pl._m = rec.m; rec.pl._k = 0;
+  dyn.edges.set(rec.k, rec);
+  let arr = dyn.pairs.get(rec.pair); if (!arr) dyn.pairs.set(rec.pair, arr = []);
+  arr.push(rec); arr.sort(lineCmp);
+  arr.forEach((r, i) => { r.pl._k = i - (arr.length - 1) / 2; styleOne(r.pl); });
+  netGroups[rec.m].addLayer(rec.pl); netLines.add(rec.pl);
+}
+function removeDynEdge(rec) {
+  netGroups[rec.m].removeLayer(rec.pl); netLines.delete(rec.pl); dyn.edges.delete(rec.k);
+  const arr = dyn.pairs.get(rec.pair);
+  if (arr) { arr.splice(arr.indexOf(rec), 1); if (!arr.length) dyn.pairs.delete(rec.pair); else arr.forEach((r, i) => { r.pl._k = i - (arr.length - 1) / 2; styleOne(r.pl); }); }
+}
+function addDynStation(rec) {
+  const near = (stationsByName.get(rec.name) || []).find(o => Math.hypot((o.lat - rec.lat) * 111, (o.lng - rec.lng) * 71) < 0.4);
+  if (near) { for (const c of rec.modes) if (!near.modes.includes(c)) near.modes += c; near.nl = Math.max(near.nl, rec.nl); near.rail = /[SUR]/.test(near.modes); rec.st = near; }
+  else { rec.st = {name: rec.name, lat: rec.lat, lng: rec.lng, modes: rec.modes, nl: rec.nl, rail: /[SUR]/.test(rec.modes), dyn: true}; STATIONS.push(rec.st); indexStation(rec.st); }
+  dyn.stations.set(rec.k, rec); stationsDirty = true;
+}
+function learn(s, m, line, color, pts) {
+  const fk = s.from.parentId || s.from.stopId, tk = s.to.parentId || s.to.stopId;
+  if (!fk || !tk || fk === tk) return;
+  const covered = "SUT".includes(m.key) && inStatic((s.from.lat + s.to.lat) / 2, (s.from.lon + s.to.lon) / 2);
+  if (covered) return;
+  const now = Date.now(), pair = fk < tk ? fk + "|" + tk : tk + "|" + fk, k = line + "#" + pair;
+  const e = dyn.edges.get(k);
+  if (e) e.t = now;
+  else addDynEdge({k, pair, l: line, c: color, m: m.key, p: encodePolyline(simplify(fk < tk ? pts : pts.slice().reverse())), t: now});
+  for (const [p, key] of [[s.from, fk], [s.to, tk]]) {
+    const r = dyn.stations.get(key);
+    if (r) { r.t = now; if (!r.modes.includes(m.key)) { r.modes += m.key; r.st.modes.includes(m.key) || (r.st.modes += m.key); r.st.rail = /[SUR]/.test(r.st.modes); } continue; }
+    addDynStation({k: key, name: cleanName(p.name), lat: +p.lat.toFixed(5), lng: +p.lon.toFixed(5), modes: m.key, nl: 1, t: now});
+  }
+  dyn.dirty = true;
+}
+function evictDyn() {
+  const cut = Date.now() - DYN_MAX_AGE;
+  const old = [...dyn.edges.values()].sort((a, b) => a.t - b.t);
+  for (let i = 0; i < old.length && (old[i].t < cut || dyn.edges.size > DYN_MAX_EDGES); i++) removeDynEdge(old[i]);
+  const olds = [...dyn.stations.values()].sort((a, b) => a.t - b.t);
+  for (let i = 0; i < olds.length && (olds[i].t < cut || dyn.stations.size > DYN_MAX_STATIONS); i++) {
+    const r = olds[i]; dyn.stations.delete(r.k);
+    if (r.st.dyn && ![...dyn.stations.values()].some(o => o.st === r.st)) {
+      STATIONS.splice(STATIONS.indexOf(r.st), 1);
+      const a = stationsByName.get(r.st.name); if (a) a.splice(a.indexOf(r.st), 1);
+    }
+  }
+}
+function saveDyn(force) {
+  if (!dyn.dirty && !force) return;
+  evictDyn();
+  const data = {v: 1,
+    e: [...dyn.edges.values()].map(r => [r.k, r.pair, r.l, r.c, r.m, r.p, Math.round(r.t / 6e4)]),
+    s: [...dyn.stations.values()].map(r => [r.k, r.name, r.lat, r.lng, r.modes, r.nl, Math.round(r.t / 6e4)])};
+  try { localStorage.setItem("rml.dyn", JSON.stringify(data)); dyn.dirty = false; }
+  catch {
+    // storage full: drop the oldest third and try once more
+    const old = [...dyn.edges.values()].sort((a, b) => a.t - b.t);
+    old.slice(0, Math.ceil(old.length / 3)).forEach(removeDynEdge);
+    try { localStorage.setItem("rml.dyn", JSON.stringify({v: 1, e: [...dyn.edges.values()].map(r => [r.k, r.pair, r.l, r.c, r.m, r.p, Math.round(r.t / 6e4)]), s: data.s})); dyn.dirty = false; } catch {}
+  }
+}
+function loadDyn() {
+  let d = null; try { d = JSON.parse(localStorage.getItem("rml.dyn") || "null"); } catch {}
+  if (!d || d.v !== 1) return;
+  for (const [k, pair, l, c, m, p, t] of d.e || []) if (netGroups[m]) addDynEdge({k, pair, l, c, m, p, t: t * 6e4});
+  for (const [k, name, lat, lng, modes, nl, t] of d.s || []) addDynStation({k, name, lat, lng, modes, nl, t: t * 6e4});
+}
+function resetDyn() {
+  [...dyn.edges.values()].forEach(removeDynEdge);
+  for (const r of dyn.stations.values()) if (r.st.dyn) { const i = STATIONS.indexOf(r.st); if (i >= 0) STATIONS.splice(i, 1); const a = stationsByName.get(r.st.name); if (a) a.splice(a.indexOf(r.st), 1); }
+  dyn.stations.clear();
+  try { localStorage.removeItem("rml.dyn"); } catch {}
+}
+loadDyn();
+setInterval(() => saveDyn(), 30000);
+addEventListener("pagehide", () => saveDyn());
+document.addEventListener("visibilitychange", () => { if (document.hidden) saveDyn(); });
 
 // ---------- helpers ----------
 function decodePolyline(s, p = 5) {
@@ -302,6 +433,7 @@ function ingest(list) {
       trips.set(tr.tripId, t);
     }
     const pts = s.polyline ? decodePolyline(s.polyline) : [[s.from.lat, s.from.lon], [s.to.lat, s.to.lon]];
+    if (m.on) learn(s, m, t.line, t.color, pts);
     const seg = {
       dep: t2ms(s.departure), arr: t2ms(s.arrival),
       sdep: t2ms(s.scheduledDeparture), sarr: t2ms(s.scheduledArrival),
@@ -386,26 +518,28 @@ function roundRect(x, y, w, h, r) {
 
 function drawStations(z, W, H) {
   if (!layers.stations || z < 11) return;
-  const showTram = z >= 13 && modeByKey.T.on, occ = [];
-  const labelRail = layers.labels && z >= 13, labelTram = layers.labels && z >= 15;
+  if (stationsDirty) sortStations();
+  const showTram = z >= 13 && modeByKey.T.on, showBus = z >= 15 && modeByKey.B.on, occ = [];
+  const labelRail = layers.labels && z >= 13, labelTram = layers.labels && z >= 15, labelBus = layers.labels && z >= 16;
   const fits = (x, y, w, h) => { for (const o of occ) if (x < o[0] + o[2] && x + w > o[0] && y < o[1] + o[3] && y + h > o[1]) return false; occ.push([x, y, w, h]); return true; };
   ctx.textAlign = "left"; ctx.textBaseline = "middle";
   ctx.font = `500 11px "Barlow", system-ui, sans-serif`;
   ctx.lineJoin = "round";
   for (const st of STATIONS) {
-    const on = (st.modes.includes("S") && modeByKey.S.on) || (st.modes.includes("U") && modeByKey.U.on) || (st.modes.includes("T") && showTram);
+    let on = false;
+    for (const c of st.modes) if (c === "T" ? showTram : c === "B" ? showBus : modeByKey[c] && modeByKey[c].on) { on = true; break; }
     if (!on) continue;
-    if (!st.rail && !showTram) continue;
+    const kind = st.rail ? "rail" : st.modes.includes("T") ? "tram" : "bus";
     const pt = map.latLngToContainerPoint([st.lat, st.lng]);
     if (pt.x < -60 || pt.y < -20 || pt.x > W + 60 || pt.y > H + 20) continue;
-    const big = st.rail && (st.nl >= 3 || z >= 14), r = st.rail ? (big ? 4.5 : 3.5) : 2.6;
+    const big = st.rail && (st.nl >= 3 || z >= 14), r = st.rail ? (big ? 4.5 : 3.5) : kind === "tram" ? 2.6 : 2.2;
     ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, 7);
     ctx.fillStyle = "#f2f5f8"; ctx.fill(); ctx.lineWidth = st.rail ? 1.8 : 1.2; ctx.strokeStyle = "#10151b"; ctx.stroke();
-    if (st.rail ? labelRail : labelTram) {
-      const tw = ctx.measureText(st.name).width, lx = pt.x + r + 4, ly = pt.y;
+    if (kind === "rail" ? labelRail : kind === "tram" ? labelTram : labelBus) {
+      const nm = displayName(st), tw = ctx.measureText(nm).width, lx = pt.x + r + 4, ly = pt.y;
       if (fits(lx - 2, ly - 8, tw + 4, 16)) {
-        ctx.lineWidth = 3; ctx.strokeStyle = "#10151bd9"; ctx.strokeText(st.name, lx, ly);
-        ctx.fillStyle = st.rail ? "#dbe3ea" : "#a3b0bd"; ctx.fillText(st.name, lx, ly);
+        ctx.lineWidth = 3; ctx.strokeStyle = "#10151bd9"; ctx.strokeText(nm, lx, ly);
+        ctx.fillStyle = st.rail ? "#dbe3ea" : "#a3b0bd"; ctx.fillText(nm, lx, ly);
       }
     }
   }
@@ -484,6 +618,11 @@ function stats(list, now) {
     const age = Math.round((now - lastOk) / 1000);
     $("st").textContent = `Live · aktualisiert vor ${age} s · ${trips.size} Fahrten geladen`;
   }
+  {
+    const n = dyn.edges.size;
+    $("dynCount").textContent = n ? `Selbst gezeichnet: ${n.toLocaleString("de-DE")} Strecken, ${dyn.stations.size.toLocaleString("de-DE")} Halte.`
+      : "Außerhalb von Rhein-Main zeichnet sich das Netz beim Zuschauen selbst.";
+  }
   const counts = {}; MODES.forEach(m => counts[m.key] = 0);
   for (const t of trips.values()) { const v = vehicleNow(t, now); if (v) counts[t.mode.key]++; }
   MODES.forEach(m => { const el = document.querySelector(`[data-m="${m.key}"] .n`); if (el) el.textContent = counts[m.key]; });
@@ -534,6 +673,7 @@ function buildModes() {
     }
   };
   $("toggle").onclick = () => $("hud").classList.toggle("collapsed");
+  $("dynReset").onclick = () => { if (confirm("Selbst gezeichnetes Liniennetz auf diesem Gerät löschen?")) { resetDyn(); stats([], Date.now()); } };
   for (const [id, key] of [["lyNet", "net"], ["lyStations", "stations"], ["lyLabels", "labels"]]) {
     $(id).onclick = () => { layers[key] = !layers[key]; $(id).setAttribute("aria-pressed", layers[key]); if (key === "net") syncNet(); store.set("layers", layers); };
     $(id).setAttribute("aria-pressed", layers[key]);
