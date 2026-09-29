@@ -26,7 +26,8 @@
     --ui:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
     color-scheme:dark;
   }
-  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 var(--ui)}
+  [hidden]{display:none!important}
+  html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none;background:var(--bg);color:var(--ink);font:14px/1.4 var(--ui)}
   #map{position:absolute;inset:0;background:var(--bg)}
   #fx{position:absolute;inset:0;pointer-events:none;z-index:450}
   .leaflet-container{background:var(--bg);font-family:var(--ui)}
@@ -74,16 +75,16 @@
 
   #info{top:calc(12px + env(safe-area-inset-top,0px));right:12px;width:320px;max-width:calc(100vw - 24px);max-height:calc(100% - 90px);
         display:flex;flex-direction:column;overflow:hidden}
-  .ih{padding:14px 14px 10px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start}
+  .ih{flex:0 0 auto;padding:14px 14px 10px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start}
   .ih .big{font:700 22px/1 var(--display);padding:5px 8px;border-radius:6px;min-width:26px;text-align:center}
   .ih .dir{flex:1;min-width:0}
   .ih .dir b{display:block;font:600 16px/1.2 var(--ui)}
   .ih .dir span{font-size:12px;color:var(--muted)}
   .x{appearance:none;border:0;background:transparent;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;padding:2px 4px}
-  .delaybox{padding:10px 14px;display:flex;gap:16px;border-bottom:1px solid var(--line)}
+  .delaybox{flex:0 0 auto;padding:10px 14px;display:flex;gap:16px;border-bottom:1px solid var(--line)}
   .delaybox div b{display:block;font:700 22px/1 var(--display);font-variant-numeric:tabular-nums}
   .delaybox div span{font-size:11px;color:var(--muted)}
-  #stops{overflow:auto;padding:6px 0 10px;margin:0;list-style:none}
+  #stops{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;padding:6px 0 10px;margin:0;list-style:none}
   #stops li{display:grid;grid-template-columns:16px 1fr auto;gap:8px;align-items:center;padding:4px 14px;font-size:13px}
   #stops li .dot{width:9px;height:9px;border-radius:50%;border:2px solid var(--muted);justify-self:center}
   #stops li.past{color:#5f6d7c}
@@ -545,7 +546,7 @@ let detail = null;
 async function select(t) {
   selected = t; detail = null;
   if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
-  renderInfo(); $("info").hidden = false;
+  renderInfo(); $("info").hidden = false; $("info").scrollTop = 0;
   try {
     const r = await fetch(`${API}/v5/trip?tripId=${encodeURIComponent(t.id)}`);
     if (!r.ok) throw new Error();
@@ -559,7 +560,7 @@ async function select(t) {
     renderInfo();
   } catch { if (selected === t) { detail = {error: true}; renderInfo(); } }
 }
-function deselect() { selected = null; detail = null; $("info").hidden = true; if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; } }
+function deselect() { selected = null; detail = null; $("info").hidden = true; $("info").innerHTML = ""; if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; } }
 
 function renderInfo() {
   const t = selected; if (!t) return;
@@ -613,10 +614,11 @@ function updateInfoLive(now, v, scroll) {
     const past = +li.dataset.t < now - 20000;
     li.classList.toggle("past", past);
     const isNext = !past && !nextMarked; li.classList.toggle("next", isNext);
-    if (isNext) { nextMarked = true; if (scroll) li.scrollIntoView({block: "center"}); }
+    if (isNext) { nextMarked = true; if (scroll) { const ol = $("stops"); ol.scrollTop = Math.max(0, li.offsetTop - ol.offsetTop - ol.clientHeight / 2); } }
   });
 }
 
+document.addEventListener("keydown", e => { if (e.key === "Escape" && selected) deselect(); });
 map.on("click", e => {
   const p = e.containerPoint; let best = null, bd = 1e9;
   for (const d of drawn) { const dd = Math.hypot(d.x - p.x, d.y - p.y); if (dd < d.r + (touch ? 10 : 0) && dd < bd) { bd = dd; best = d; } }
