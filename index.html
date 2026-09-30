@@ -475,19 +475,24 @@ async function load() {
 }
 
 // ---------- position of a trip right now ----------
+// Departure times in the feed are whole minutes and trains often leave a little after the
+// predicted minute. So a train waits at the platform for up to HOLD_MS after its predicted
+// departure (at most half the segment time) and then catches up to arrive on time.
+const HOLD_MS = 60000;
+const holdOf = s => Math.min(HOLD_MS, Math.max(0, (s.arr - s.dep) * 0.5));
 function vehicleNow(t, now) {
   if (!t.sorted) t.sorted = [...t.segs.values()].sort((a, b) => a.dep - b.dep);
   const S = t.sorted; if (!S.length) return null;
   for (let i = 0; i < S.length; i++) {
-    const s = S[i];
-    if (now >= s.dep && now <= s.arr) {
-      const f = s.arr > s.dep ? (now - s.dep) / (s.arr - s.dep) : 1;
+    const s = S[i], d0 = s.dep + holdOf(s);
+    if (now >= d0 && now <= s.arr) {
+      const f = s.arr > d0 ? (now - d0) / (s.arr - d0) : 1;
       const p = pointAt(s, ease(f));
       return {...p, delay: (s.arr - s.sarr) / 60000, next: s.to, prev: s.from, moving: true, rt: s.rt};
     }
-    if (now < s.dep) {
+    if (now < d0) {
       const prev = S[i-1];
-      if (prev ? now >= prev.arr : s.dep - now < 90000) {
+      if (prev ? now >= prev.arr : d0 - now < 90000) {
         const p = pointAt(s, 0);
         return {...p, hd: pointAt(s, 0.05).hd, delay: (s.dep - s.sdep) / 60000, next: s.to, prev: s.from, at: s.from, moving: false, rt: s.rt};
       }
